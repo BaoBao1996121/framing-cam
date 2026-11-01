@@ -1,11 +1,14 @@
-import { FaceLandmarker, FilesetResolver, PoseLandmarker } from "@mediapipe/tasks-vision";
+import { FaceLandmarker, FilesetResolver, ImageSegmenter, PoseLandmarker } from "@mediapipe/tasks-vision";
+import { headTopFromCategoryMask } from "../composition/head-top";
 import type { RawFace, RawPoint, RawPose } from "../composition/subject";
+import { eyesClosedFromBlend, type BlendCategory } from "../guidance/eyes";
 import { installImportScriptsShim } from "./loader";
 
 export type VisionPaths = {
   wasmPath: string;
   poseModel: string;
   faceModel: string;
+  segmentModel?: string;
   cpuOnly?: boolean;
 };
 
@@ -18,6 +21,8 @@ export type Detection = {
   faceError: string;
   frameWidth: number;
   frameHeight: number;
+  eyesClosed: boolean;
+  maskHeadTop: number | null;
 };
 
 const FACE = {
@@ -108,11 +113,16 @@ export class Detectors {
   faceError = "";
   private pose: PoseLandmarker | null = null;
   private face: FaceLandmarker | null = null;
+  private segmenter: ImageSegmenter | null = null;
+  private segmentUrl = "";
+  private maskHeadTop: number | null = null;
+  private lastSegment = 0;
   private poseTime = 0;
   private faceTime = 0;
   private faceStride = 1;
   private frameCount = 0;
   private lastFaces: RawFace[] = [];
+  private lastEyesClosed = false;
   private factory: ((moduleArg?: unknown) => Promise<unknown>) | undefined;
   private wasmBase = "";
   private cpuOnly = false;
@@ -165,7 +175,7 @@ export class Detectors {
       minFaceDetectionConfidence: 0.3,
       minFacePresenceConfidence: 0.3,
       minTrackingConfidence: 0.3,
-      outputFaceBlendshapes: false,
+      outputFaceBlendshapes: true,
       outputFacialTransformationMatrixes: false,
     };
     const make = async (useCpu: boolean) => {
@@ -217,6 +227,24 @@ export class Detectors {
       }
     }
     this.faceReady = this.face != null;
+    this.segmentUrl = paths.segmentModel ?? "";
+    if (this.segmentUrl) void this.createSegmenter();
+  }
+
+  private async createSegmenter(): Promise<void> {
+    try {
+      const vision = await this.freshVision();
+      const canvas = explicitCanvas();
+      this.segmenter = await ImageSegmenter.createFromOptions(vision, {
+        runningMode: "VIDEO",
+        outputCategoryMask: true,
+        outputConfidenceMasks: false,
+        ...(canvas ? { canvas } : {}),
+        baseOptions: { modelAssetPath: this.segmentUrl, delegate: "CPU" },
+      });
+    } catch {
+      this.segmenter = null;
+    }
   }
 
   detect(image: ImageData, timestamp: number): Detection {
@@ -232,9 +260,35 @@ export class Detectors {
       if (timestamp > this.faceTime) this.faceTime = timestamp;
       else this.faceTime += 1;
       const faceStarted = performance.now();
-      this.lastFaces = slimFaces(this.face.detectForVideo(image, this.faceTime).faceLandmarks);
+      const faceResult = this.face.detectForVideo(image, this.faceTime) as {
+        faceLandmarks: { x: number; y: number }[][];
+        faceBlendshapes?: { categories?: BlendCategory[] }[];
+      };
+      this.lastFaces = slimFaces(faceResult.faceLandmarks);
+      this.lastEyesClosed = eyesClosedFromBlend(faceResult.faceBlendshapes?.[0]?.categories);
       if (performance.now() - faceStarted > 50) this.faceStride = 2;
       else this.faceStride = 1;
+    }
+    if (this.segmenter && this.lastFaces[0] && timestamp - this.lastSegment > 700 && performance.now() - started < 45) {
+      this.lastSegment = timestamp;
+      try {
+        const maskResult = this.segmenter.segmentForVideo(image, this.poseTime);
+        const mask = maskResult.categoryMask;
+        const face = this.lastFaces[0];
+        if (mask) {
+          const top = headTopFromCategoryMask(
+            mask.getAsUint8Array(),
+            mask.width,
+            mask.height,
+            Math.min(face.leftCheek.x, face.leftEye.x),
+            Math.max(face.rightCheek.x, face.rightEye.x),
+          );
+          if (top != null) this.maskHeadTop = top;
+          mask.close();
+        }
+      } catch {
+        this.maskHeadTop = null;
+      }
     }
     return {
       faces: this.lastFaces,
@@ -245,13 +299,17 @@ export class Detectors {
       faceError: this.faceError,
       frameWidth: image.width,
       frameHeight: image.height,
+      eyesClosed: this.lastEyesClosed,
+      maskHeadTop: this.maskHeadTop,
     };
   }
 
   close(): void {
     this.pose?.close();
     this.face?.close();
+    this.segmenter?.close();
     this.pose = null;
     this.face = null;
+    this.segmenter = null;
   }
 }

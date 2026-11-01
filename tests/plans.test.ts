@@ -28,10 +28,14 @@ describe("shot plan JSON", () => {
     expect(plans.some((plan) => plan.title === "坏的")).toBe(false);
   });
 
-  it("turns an old single box into a full set of plans", () => {
+  it("ignores coordinate-only replies and solves the box from shot size", () => {
     const plans = repairPlans({ box: { x: 0.2, y: 0.1, w: 0.5, h: 0.6 }, reasoning: "old" }, context);
     expect(plans.length).toBeGreaterThanOrEqual(2);
-    expect(plans[0].targetBox.w).toBeCloseTo(0.5);
+    const solved = repairPlans({ plans: [{ title: "干净半身", shotSize: "medium", targetBox: { x: 0, y: 0, w: 0.9, h: 0.9 } }] }, context);
+    const clean = repairPlans({ plans: [{ title: "干净半身", shotSize: "medium" }] }, context);
+    expect(solved[0].targetBox).toEqual(clean[0].targetBox);
+    expect(plans[0].targetBox.w).toBeGreaterThan(0.1);
+    expect(plans[0].targetBox.x).toBeGreaterThanOrEqual(0);
   });
 
   it("falls back when the model returns nothing usable", () => {
@@ -57,6 +61,9 @@ describe("shot plan JSON", () => {
     });
     expect(prompt).toContain("显腿长");
     expect(prompt).toContain("Simplified Chinese");
+    expect(prompt).toContain("untrusted sensor data");
+    expect(prompt).toContain("<subject>");
+    expect(PLANS_SYSTEM).toMatch(/never|do not output/i);
     expect(fallbackPlans("显腿长", null)[0].shotSize).toBe("full");
   });
 });

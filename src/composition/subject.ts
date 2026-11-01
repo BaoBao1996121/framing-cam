@@ -1,3 +1,4 @@
+import { portraitTargets } from "./targets";
 import type { JointName, Point, Subject } from "./types";
 
 export type RawPoint = { x: number; y: number; visibility?: number };
@@ -38,7 +39,7 @@ export const POSE = {
   rightAnkle: 28,
 } as const;
 
-const VISIBLE = 0.45;
+const VISIBLE = portraitTargets.landmarks.minVisibility;
 
 export function headHeight(subject: Subject): number {
   return Math.max(0.001, subject.chinY - subject.headTop);
@@ -109,7 +110,7 @@ export function subjectFromFaceAndPose(face: RawFace | null, pose: RawPose | nul
     const yaw = iod > 0.008 ? (face.nose.x - eyeX) / iod : 0;
     return {
       eye: { x: eyeX, y: eyeY },
-      headTop: face.forehead.y - faceH * 0.55,
+      headTop: face.forehead.y - faceH * portraitTargets.landmarks.headTopFromFace.faceTopMinusChinToFaceTopRatio,
       chinY: face.chin.y,
       headLeft: Math.min(face.leftCheek.x, face.leftEye.x, face.rightEye.x),
       headRight: Math.max(face.rightCheek.x, face.leftEye.x, face.rightEye.x),

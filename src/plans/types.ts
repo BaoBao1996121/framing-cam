@@ -6,11 +6,14 @@ export type CameraAdvice = {
   distance: string;
 };
 
-/** One way to shoot the look the user asked for. targetBox is where the subject should sit. */
+/** One way to shoot the look the user asked for. targetBox is solved from the fields above it. */
 export type ShotPlan = {
   title: string;
   styleTag: string;
   shotSize: string;
+  eyeLine: number;
+  horizontal: number;
+  headroom: number;
   targetBox: Rect;
   cameraAdvice: CameraAdvice;
   zoom: number;
@@ -23,4 +26,7 @@ export type PlanContext = {
   style: string;
   locale: string;
   subjectBox: Rect | null;
+  imageWidth?: number;
+  imageHeight?: number;
+  aspect?: "4:5" | "3:4" | "9:16";
 };

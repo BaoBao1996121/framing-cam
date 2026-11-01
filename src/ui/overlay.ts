@@ -17,6 +17,7 @@ export function drawOverlay(
     guideAligned?: boolean;
     guideHint?: GuidanceCode | "hold";
     guideScore?: number;
+    guideMagnitude?: number;
   },
 ): void {
   const { width, height } = input;
@@ -41,7 +42,8 @@ export function drawOverlay(
   const ghost = normRectToScreen(input.guideTarget, cover, input.mirror);
   fillBust(context, ghost, tone, input.guideAligned ? 0.78 : 0.22 + Math.max(0, Math.min(1, score)) * 0.38);
   const hint = input.guideHint ?? input.plan.guidance;
-  if (!input.guideAligned) drawBigArrow(context, hint, width, height, Math.max(0.2, 1 - score));
+  const magnitude = input.guideMagnitude != null ? Math.max(0.2, Math.min(1.6, input.guideMagnitude)) : Math.max(0.2, 1 - score);
+  if (!input.guideAligned) drawBigArrow(context, hint, width, height, magnitude);
 }
 
 export function fillBust(

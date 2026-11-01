@@ -1,0 +1,39 @@
+{
+  "version": "0.2.0-calibrated",
+  "units": "normalized_crop",
+  "note": "P10-P90 from 159 Wikimedia portraits (MediaPipe). Inside this band the guide stays quiet. The silhouette still aims at the narrow ranges in portrait-targets.json. Environment 4:5 had n<10, so that cell keeps the spec band.",
+  "faceX": {
+    "closeUp": [0.45, 0.537],
+    "halfBody": [0.408, 0.541],
+    "threeQuarter": [0.425, 0.669],
+    "fullBody": [0.341, 0.539],
+    "environment": [0.414, 0.589]
+  },
+  "shots": {
+    "closeUp": {
+      "4:5": { "eyeY": [0.269, 0.432], "headroom": [0.0, 0.138], "subjH": [0.862, 1.0], "faceH": [0.268, 0.513] },
+      "3:4": { "eyeY": [0.264, 0.416], "headroom": [0.0, 0.123], "subjH": [0.877, 1.0], "faceH": [0.278, 0.507] },
+      "9:16": { "eyeY": [0.277, 0.417], "headroom": [0.0, 0.125], "subjH": [0.875, 1.0], "faceH": [0.284, 0.504] }
+    },
+    "halfBody": {
+      "4:5": { "eyeY": [0.19, 0.386], "headroom": [0.04, 0.239], "subjH": [0.761, 0.96], "faceH": [0.19, 0.266] },
+      "3:4": { "eyeY": [0.196, 0.38], "headroom": [0.04, 0.242], "subjH": [0.758, 0.96], "faceH": [0.179, 0.276] },
+      "9:16": { "eyeY": [0.222, 0.383], "headroom": [0.046, 0.249], "subjH": [0.751, 0.954], "faceH": [0.191, 0.29] }
+    },
+    "threeQuarter": {
+      "4:5": { "eyeY": [0.118, 0.339], "headroom": [0.04, 0.277], "subjH": [0.723, 0.96], "faceH": [0.089, 0.169] },
+      "3:4": { "eyeY": [0.11, 0.378], "headroom": [0.037, 0.288], "subjH": [0.712, 0.963], "faceH": [0.089, 0.157] },
+      "9:16": { "eyeY": [0.134, 0.364], "headroom": [0.034, 0.28], "subjH": [0.72, 0.966], "faceH": [0.09, 0.16] }
+    },
+    "fullBody": {
+      "4:5": { "eyeY": [0.11, 0.37], "headroom": [0.04, 0.297], "subjH": [0.646, 0.934], "footRoom": [0.008, 0.129], "faceH": [0.068, 0.111] },
+      "3:4": { "eyeY": [0.111, 0.3], "headroom": [0.04, 0.243], "subjH": [0.67, 0.944], "footRoom": [0.005, 0.128], "faceH": [0.074, 0.127] },
+      "9:16": { "eyeY": [0.103, 0.298], "headroom": [0.028, 0.21], "subjH": [0.697, 0.941], "footRoom": [0.012, 0.12], "faceH": [0.071, 0.119] }
+    },
+    "environment": {
+      "4:5": { "eyeY": [0.28, 0.4], "subjH": [0.35, 0.6] },
+      "3:4": { "eyeY": [0.274, 0.402], "subjH": [0.445, 0.587], "faceH": [0.05, 0.103] },
+      "9:16": { "eyeY": [0.277, 0.512], "subjH": [0.364, 0.585], "faceH": [0.033, 0.102] }
+    }
+  }
+}

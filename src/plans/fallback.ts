@@ -1,20 +1,34 @@
+import { normalizeShotSize, placementFor, resolveTarget, type FrameSize, DEFAULT_FRAME } from "../composition/intent";
+import type { ShotSize } from "../composition/intent";
 import type { Rect } from "../composition/types";
 import type { ShotPlan } from "./types";
 
+function solved(shotSize: string, yaw: number, frame: FrameSize): Pick<ShotPlan, "shotSize" | "eyeLine" | "horizontal" | "headroom" | "targetBox"> {
+  const size: ShotSize = normalizeShotSize(shotSize);
+  const target = resolveTarget({ shotSize: size, yaw }, frame.aspect);
+  return {
+    shotSize,
+    eyeLine: target.eyeY,
+    horizontal: target.horizontal,
+    headroom: target.headroom,
+    targetBox: placementFor(target, frame).subjectBox,
+  };
+}
+
 function plan(
-  partial: Pick<ShotPlan, "title" | "styleTag" | "shotSize" | "targetBox" | "poseTip" | "holderDirection"> & {
+  partial: Omit<ShotPlan, "targetBox" | "eyeLine" | "horizontal" | "headroom" | "cameraAdvice" | "shotSize"> & {
+    shotSize: string;
+    yaw?: number;
     height: string;
     tilt: string;
     distance: string;
-    zoom: number;
-    confidence: number;
   },
+  frame: FrameSize,
 ): ShotPlan {
   return {
     title: partial.title,
     styleTag: partial.styleTag,
-    shotSize: partial.shotSize,
-    targetBox: partial.targetBox,
+    ...solved(partial.shotSize, partial.yaw ?? 0, frame),
     cameraAdvice: { height: partial.height, tilt: partial.tilt, distance: partial.distance },
     zoom: partial.zoom,
     poseTip: partial.poseTip,
@@ -23,35 +37,43 @@ function plan(
   };
 }
 
-/** On-device plans when the network or the key is missing. Three distinct framings for the words they typed. */
-export function fallbackPlans(style: string, subject: Rect | null): ShotPlan[] {
+/** On-device plans. Boxes come from the spec solver, not from stored coordinates. */
+export function fallbackPlans(style: string, subject: Rect | null, frame?: FrameSize): ShotPlan[] {
   const tag = style.trim() || "自然";
+  const used = frame ?? DEFAULT_FRAME;
   const legs = /腿|全身|full/i.test(tag);
   const funny = /搞笑|滑稽|funny/i.test(tag);
   const mood = /氛围|胶片|mood|film/i.test(tag);
   const pretty = /唯美|柔|美|pretty|soft/i.test(tag);
-  const anchor = subject ?? { x: 0.32, y: 0.16, w: 0.36, h: 0.42 };
+  const seen = subject ? 0.02 : 0;
+  const make = (
+    partial: Omit<ShotPlan, "targetBox" | "eyeLine" | "horizontal" | "headroom" | "cameraAdvice" | "shotSize"> & {
+      shotSize: string;
+      yaw?: number;
+      height: string;
+      tilt: string;
+      distance: string;
+    },
+  ) => plan(partial, used);
 
   if (legs) {
     return [
-      plan({
+      make({
         title: "低机位拉长",
         styleTag: tag,
         shotSize: "full",
-        targetBox: { x: 0.28, y: 0.06, w: 0.44, h: 0.82 },
         height: "机位放到膝盖以下",
         tilt: "保持水平",
         distance: "退到能放下全身",
         zoom: 1,
         poseTip: "重心放在后腿，肩打开",
         holderDirection: "人站在画面中线，头顶留一点天",
-        confidence: 0.62,
+        confidence: 0.62 + seen,
       }),
-      plan({
+      make({
         title: "七分身",
         styleTag: tag,
         shotSize: "three-quarter",
-        targetBox: { x: 0.26, y: 0.08, w: 0.48, h: 0.7 },
         height: "机位略低于胸口",
         tilt: "保持水平",
         distance: "再退一步",
@@ -60,11 +82,11 @@ export function fallbackPlans(style: string, subject: Rect | null): ShotPlan[] {
         holderDirection: "切在大腿中段，不要切到膝盖",
         confidence: 0.58,
       }),
-      plan({
+      make({
         title: "留白全身",
         styleTag: tag,
         shotSize: "environmental",
-        targetBox: { x: 0.34, y: 0.1, w: 0.32, h: 0.72 },
+        yaw: 0.4,
         height: "与腰平",
         tilt: "保持水平",
         distance: "退远，让环境进来",
@@ -78,11 +100,10 @@ export function fallbackPlans(style: string, subject: Rect | null): ShotPlan[] {
 
   if (funny) {
     return [
-      plan({
+      make({
         title: "靠近抓表情",
         styleTag: tag,
         shotSize: "close",
-        targetBox: { x: 0.28, y: 0.18, w: 0.44, h: 0.36 },
         height: "略低于眼睛",
         tilt: "可以微微歪一下",
         distance: "走近半步",
@@ -91,11 +112,11 @@ export function fallbackPlans(style: string, subject: Rect | null): ShotPlan[] {
         holderDirection: "脸放在画面上半，别切到下巴",
         confidence: 0.6,
       }),
-      plan({
+      make({
         title: "半身笑点",
         styleTag: tag,
         shotSize: "medium",
-        targetBox: { x: 0.22, y: 0.12, w: 0.5, h: 0.55 },
+        yaw: 0.4,
         height: "与眼平",
         tilt: "保持水平",
         distance: "保持现在的距离",
@@ -104,11 +125,11 @@ export function fallbackPlans(style: string, subject: Rect | null): ShotPlan[] {
         holderDirection: "人靠一侧，给手势留空",
         confidence: 0.55,
       }),
-      plan({
+      make({
         title: "环境里的人",
         styleTag: tag,
         shotSize: "wide",
-        targetBox: { x: anchor.x, y: 0.14, w: Math.min(0.4, anchor.w), h: 0.62 },
+        yaw: 0.4,
         height: "略高一点俯视",
         tilt: "保持水平",
         distance: "后退，把周围一起带上",
@@ -121,11 +142,11 @@ export function fallbackPlans(style: string, subject: Rect | null): ShotPlan[] {
   }
 
   const primary = mood
-    ? plan({
+    ? make({
         title: "侧光留白",
         styleTag: tag,
         shotSize: "medium",
-        targetBox: { x: 0.1, y: 0.12, w: 0.38, h: 0.5 },
+        yaw: 0.4,
         height: "与眼平或略低",
         tilt: "保持水平",
         distance: "保持，不要贴太近",
@@ -135,11 +156,10 @@ export function fallbackPlans(style: string, subject: Rect | null): ShotPlan[] {
         confidence: 0.64,
       })
     : pretty
-      ? plan({
+      ? make({
           title: "柔和半身",
           styleTag: tag,
           shotSize: "medium",
-          targetBox: { x: 0.27, y: 0.1, w: 0.46, h: 0.52 },
           height: "与眼平",
           tilt: "保持水平",
           distance: "再靠近一点点",
@@ -148,27 +168,25 @@ export function fallbackPlans(style: string, subject: Rect | null): ShotPlan[] {
           holderDirection: "眼睛靠近上三分线，头顶留白",
           confidence: 0.66,
         })
-      : plan({
+      : make({
           title: "干净半身",
           styleTag: tag,
           shotSize: "medium",
-          targetBox: { x: 0.26, y: 0.1, w: 0.48, h: 0.54 },
           height: "与眼平",
           tilt: "保持水平",
           distance: "走到胸口以上刚好",
           zoom: 1.1,
           poseTip: "肩放松，看向镜头",
           holderDirection: "人在中线，眼睛在上三分线附近",
-          confidence: 0.6,
+          confidence: 0.6 + seen,
         });
 
   return [
     primary,
-    plan({
+    make({
       title: "再紧一点",
       styleTag: tag,
       shotSize: "close",
-      targetBox: { x: 0.3, y: 0.14, w: 0.4, h: 0.4 },
       height: "与眼平",
       tilt: "保持水平",
       distance: "向前半步",
@@ -177,11 +195,11 @@ export function fallbackPlans(style: string, subject: Rect | null): ShotPlan[] {
       holderDirection: "脸完整，下巴下方留一点",
       confidence: 0.54,
     }),
-    plan({
+    make({
       title: "带一点环境",
       styleTag: tag,
       shotSize: "wide",
-      targetBox: { x: 0.34, y: 0.12, w: 0.36, h: 0.62 },
+      yaw: -0.4,
       height: "略低于眼睛",
       tilt: "保持水平",
       distance: "后退一步",

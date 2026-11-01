@@ -2,12 +2,14 @@ import type { AspectId } from "../src/composition/types";
 import { buildPlansPrompt, PLANS_SYSTEM } from "../src/plans/prompt";
 import { repairPlansFromText } from "../src/plans/validate";
 import type { Rect } from "../src/composition/types";
+import { allowlistFromEnv, allowRate, clampText, clientIp, originAllowed, safeSubject } from "./guard";
 
 export type LlmEnv = {
   LLM_API_KEY?: string;
   LLM_PROVIDER?: string;
   LLM_BASE_URL?: string;
   LLM_MODEL?: string;
+  FRAME_ORIGINS?: string;
 };
 
 const SYSTEM = PLANS_SYSTEM;
@@ -220,6 +222,10 @@ export async function handleApi(request: Request, env: LlmEnv): Promise<Response
   if (pathname !== "/api/frame" && !pathname.endsWith("/api/frame")) return json({ ok: false, error: "not_found" }, 404);
   if (request.method !== "POST") return json({ ok: false, error: "method" }, 405);
   if (!llmConfigured(env)) return json({ ok: false, error: "unconfigured" });
+  if (!originAllowed(request.headers.get("origin"), allowlistFromEnv(env.FRAME_ORIGINS))) {
+    return json({ ok: false, error: "origin" }, 403);
+  }
+  if (!allowRate(clientIp(request), Date.now())) return json({ ok: false, error: "rate" }, 429);
 
   const raw = await request.text();
   if (raw.length > 1_800_000) return json({ ok: false, error: "too_large" }, 413);
@@ -234,14 +240,16 @@ export async function handleApi(request: Request, env: LlmEnv): Promise<Response
   if (!body.aspect || !isAspect(body.aspect)) return json({ ok: false, error: "bad_aspect" }, 400);
   const imageWidth = Number(body.imageWidth);
   const imageHeight = Number(body.imageHeight);
-  if (!Number.isFinite(imageWidth) || !Number.isFinite(imageHeight)) return json({ ok: false, error: "bad_size" }, 400);
-  const style = typeof body.style === "string" && body.style.trim() ? body.style.trim().slice(0, 80) : "自然";
-  const locale = body.locale || "zh-CN";
+  if (!Number.isFinite(imageWidth) || !Number.isFinite(imageHeight) || imageWidth < 2 || imageHeight < 2 || imageWidth > 8000 || imageHeight > 8000) {
+    return json({ ok: false, error: "bad_size" }, 400);
+  }
+  const style = clampText(body.style, 80, "自然");
+  const locale = clampText(body.locale, 16, "zh-CN");
   const subjectBox = body.subject?.box && typeof body.subject.box === "object" ? body.subject.box : null;
   const zoom = {
-    min: Number(body.zoom?.min ?? 1) || 1,
-    max: Number(body.zoom?.max ?? 1) || 1,
-    current: Number(body.zoom?.current ?? 1) || 1,
+    min: Math.min(10, Math.max(1, Number(body.zoom?.min ?? 1) || 1)),
+    max: Math.min(10, Math.max(1, Number(body.zoom?.max ?? 1) || 1)),
+    current: Math.min(10, Math.max(1, Number(body.zoom?.current ?? 1) || 1)),
   };
   const prompt = buildPlansPrompt({
     style,
@@ -251,7 +259,7 @@ export async function handleApi(request: Request, env: LlmEnv): Promise<Response
     imageHeight,
     rollDeg: typeof body.rollDeg === "number" ? body.rollDeg : null,
     zoom,
-    subject: body.subject ?? null,
+    subject: safeSubject(body.subject ?? null),
   });
   try {
     const text = await callModel(env, prompt, dataUrl);

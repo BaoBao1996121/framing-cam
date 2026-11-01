@@ -36,22 +36,78 @@ for (const mode of ["other", "self"] as const) {
     }, faceUrl);
     await page.waitForFunction(() => document.getElementById("open-camera")?.textContent?.includes("打开"));
     await page.locator("#open-camera").click();
+    test.setTimeout(90_000);
     await page.waitForFunction(() => {
       const guidance = document.body.dataset.guidance || "";
       const prompt = document.body.dataset.prompt || "";
-      return document.body.dataset.screen === "live" && guidance !== "" && guidance !== "searching" && guidance !== "ready" && prompt !== "";
+      return document.body.dataset.screen === "live" && guidance !== "" && guidance !== "searching" && prompt !== "";
     });
     const before = await page.evaluate(() => ({
-      guidance: document.body.dataset.guidance,
-      prompt: document.body.dataset.prompt,
+      guidance: document.body.dataset.guidance || "",
+      prompt: document.body.dataset.prompt || "",
       shoot: document.body.dataset.shoot || "other",
     }));
     expect(before.shoot).toBe(mode);
-    expect(before.prompt).toBe(mode === "self" ? "脸往左一点" : "手机往左");
-    await page.evaluate(() => {
-      (window as unknown as { __spot: { x: number; y: number; w: number; h: number } }).__spot = { x: 80, y: 40, w: 280, h: 360 };
+    const phrases: Record<string, string> =
+      mode === "self"
+        ? {
+            left: "脸往左一点",
+            right: "脸往右一点",
+            up: "手机举高一点",
+            down: "手机放低一点",
+            closer: "靠近一点",
+            back: "离远一点",
+            raiseLeft: "左边抬高",
+            raiseRight: "右边抬高",
+            steady: "别动",
+            ready: "准备拍",
+          }
+        : {
+            left: "手机往左",
+            right: "手机往右",
+            up: "手机抬高一点",
+            down: "手机放低一点",
+            closer: "往前走一步",
+            back: "后退一步",
+            raiseLeft: "左边抬高",
+            raiseRight: "右边抬高",
+            steady: "稳住",
+            ready: "好了",
+          };
+    expect(before.prompt).toBe(phrases[before.guidance]);
+    const trace = await page.evaluate(async () => {
+      const host = window as unknown as { __spot: { x: number; y: number; w: number; h: number } };
+      const deadline = performance.now() + 40000;
+      const seen: string[] = [];
+      let last = "";
+      while (performance.now() < deadline && document.body.dataset.captured !== "1") {
+        const hint = document.body.dataset.guidance || "";
+        if (seen[seen.length - 1] !== hint) seen.push(hint);
+        last = `${seen.join(">")} ${document.body.dataset.subject || ""}`;
+        const spot = host.__spot;
+        if (hint === "left") spot.x += 3;
+        else if (hint === "right") spot.x -= 3;
+        else if (hint === "up") spot.y += 3;
+        else if (hint === "down") spot.y -= 3;
+        else if (hint === "closer" || hint === "back") {
+          const cx = spot.x + spot.w / 2;
+          const cy = spot.y + spot.h / 2;
+          const scale = hint === "closer" ? 1.012 : 0.988;
+          spot.w *= scale;
+          spot.h *= scale;
+          spot.x = cx - spot.w / 2;
+          spot.y = cy - spot.h / 2;
+        }
+        spot.x = Math.max(0, Math.min(480 - spot.w, spot.x));
+        spot.y = Math.max(0, Math.min(640 - spot.h, spot.y));
+        spot.w = Math.max(80, Math.min(460, spot.w));
+        spot.h = Math.max(100, Math.min(620, spot.h));
+        await new Promise((resolve) => setTimeout(resolve, 220));
+      }
+      return last;
     });
-    await page.waitForFunction(() => document.body.dataset.captured === "1");
+    console.log(mode, before.guidance, before.prompt, trace);
+    await page.waitForFunction(() => document.body.dataset.captured === "1", undefined, { timeout: 5_000 });
     const after = await page.evaluate(() => ({
       screen: document.body.dataset.screen,
       status: document.getElementById("vision-status")?.hidden ? "" : document.getElementById("vision-status")?.textContent || "",

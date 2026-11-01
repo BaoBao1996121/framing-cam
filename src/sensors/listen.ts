@@ -7,6 +7,9 @@ export class MotionLevel {
   gamma: number | null = null;
   beta: number | null = null;
   linearG: number | null = null;
+  /** Degrees per second of device gamma. Zero when orientation events are absent. */
+  gammaPerSec = 0;
+  private gammaSample: { value: number; time: number } | null = null;
 
   roll(): number | null {
     return chooseRoll({ gravity: this.gravity, gamma: this.gamma, beta: this.beta });
@@ -37,6 +40,17 @@ export class MotionLevel {
   }
 
   private onOrientation = (event: DeviceOrientationEvent): void => {
+    const now = performance.now();
+    if (event.gamma != null && this.gammaSample) {
+      const dt = (now - this.gammaSample.time) / 1000;
+      if (dt > 0.016 && dt < 0.5) {
+        let delta = event.gamma - this.gammaSample.value;
+        if (delta > 180) delta -= 360;
+        if (delta < -180) delta += 360;
+        this.gammaPerSec = delta / dt;
+      }
+    }
+    if (event.gamma != null) this.gammaSample = { value: event.gamma, time: now };
     this.gamma = event.gamma;
     this.beta = event.beta;
   };

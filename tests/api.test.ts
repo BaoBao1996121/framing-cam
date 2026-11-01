@@ -9,6 +9,28 @@ describe("framing API", () => {
     expect(await response.json()).toEqual({ ok: true, llm: false });
   });
 
+  it("rejects a foreign origin and limits repeated frame calls", async () => {
+    const env = { LLM_API_KEY: "test-key" };
+    const denied = await handleApi(
+      new Request("http://local/api/frame", {
+        method: "POST",
+        headers: { origin: "https://evil.example", "x-forwarded-for": "203.0.113.9" },
+        body: "{}",
+      }),
+      env,
+    );
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).toMatchObject({ ok: false, error: "origin" });
+
+    const headers = { origin: "http://127.0.0.1:5199", "x-forwarded-for": "203.0.113.10" };
+    let limited = 0;
+    for (let index = 0; index < 9; index += 1) {
+      const response = await handleApi(new Request("http://local/api/frame", { method: "POST", headers, body: "{" }), env);
+      if (response.status === 429) limited += 1;
+    }
+    expect(limited).toBe(1);
+  });
+
   it("refuses a frame call when no key is configured", async () => {
     const response = await handleApi(
       new Request("http://local/api/frame", {

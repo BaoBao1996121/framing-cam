@@ -1,8 +1,15 @@
 import type { RawFace, RawPose } from "../composition/subject";
 import type { Detectors } from "./runtime";
 
-export type Perception = { faces: RawFace[]; poses: RawPose[]; inferenceMs: number };
-export type VisionPaths = { wasmPath: string; poseModel: string; faceModel: string; cpuOnly?: boolean; mainThread?: boolean };
+export type Perception = { faces: RawFace[]; poses: RawPose[]; inferenceMs: number; eyesClosed: boolean; maskHeadTop: number | null };
+export type VisionPaths = {
+  wasmPath: string;
+  poseModel: string;
+  faceModel: string;
+  segmentModel?: string;
+  cpuOnly?: boolean;
+  mainThread?: boolean;
+};
 
 type WorkerData = {
   type: string;
@@ -17,6 +24,8 @@ type WorkerData = {
   delegate?: string;
   frameWidth?: number;
   frameHeight?: number;
+  eyesClosed?: boolean;
+  maskHeadTop?: number | null;
 };
 
 export class VisionClient {
@@ -75,6 +84,8 @@ export class VisionClient {
           faces: data.faces ?? [],
           poses: data.poses ?? [],
           inferenceMs: data.inferenceMs ?? 0,
+          eyesClosed: Boolean(data.eyesClosed),
+          maskHeadTop: data.maskHeadTop ?? null,
         });
         return;
       }
@@ -147,7 +158,13 @@ export class VisionClient {
         this.faceError = found.faceError;
         this.frameWidth = found.frameWidth;
         this.frameHeight = found.frameHeight;
-        this.onResult({ faces: found.faces, poses: found.poses, inferenceMs: found.inferenceMs });
+        this.onResult({
+          faces: found.faces,
+          poses: found.poses,
+          inferenceMs: found.inferenceMs,
+          eyesClosed: found.eyesClosed,
+          maskHeadTop: found.maskHeadTop,
+        });
       } catch (error) {
         this.onError(error instanceof Error ? error.message : "frame");
       } finally {

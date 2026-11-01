@@ -1,0 +1,624 @@
+{
+  "version": "0.2.0-calibrated",
+  "units": "normalized_frame",
+  "evidence_note": "S=sourced, D=derived, P=proposed; see spec",
+  "landmarks": {
+    "eye": {
+      "pose": [
+        2,
+        5
+      ],
+      "faceMesh": [
+        468,
+        473
+      ],
+      "fallbackFaceMesh": [
+        33,
+        263
+      ]
+    },
+    "chin": {
+      "faceMesh": [
+        152
+      ]
+    },
+    "faceTop": {
+      "faceMesh": [
+        10
+      ]
+    },
+    "headTopFromFace": {
+      "faceTopMinusChinToFaceTopRatio": 0.466,
+      "p10_p90": [
+        0.159,
+        0.695
+      ],
+      "evidence": "calibrated median; prefer segmentation mask top (hair|face-skin classes) when available"
+    },
+    "shoulder": [
+      11,
+      12
+    ],
+    "elbow": [
+      13,
+      14
+    ],
+    "wrist": [
+      15,
+      16
+    ],
+    "hip": [
+      23,
+      24
+    ],
+    "knee": [
+      25,
+      26
+    ],
+    "ankle": [
+      27,
+      28
+    ],
+    "feet": [
+      29,
+      30,
+      31,
+      32
+    ],
+    "ears": [
+      7,
+      8
+    ],
+    "nose": 0,
+    "waistFromHip": {
+      "towardShoulder": 0.25,
+      "evidence": "P"
+    },
+    "minVisibility": 0.5,
+    "headTopSource": "selfie_multiclass_segmentation"
+  },
+  "horizontal": {
+    "frontalYawMax": 0.15,
+    "frontalCenterX": [
+      0.46,
+      0.54
+    ],
+    "turnedFaceX": {
+      "facingRight": [
+        0.36,
+        0.4
+      ],
+      "facingLeft": [
+        0.6,
+        0.64
+      ]
+    },
+    "wideThirdsX": {
+      "facingRight": [
+        0.283,
+        0.383
+      ],
+      "facingLeft": [
+        0.617,
+        0.717
+      ]
+    },
+    "sideMarginMin": 0.04,
+    "kissingThreshold": 0.02
+  },
+  "cropBands": {
+    "upperArm": {
+      "from": "shoulder",
+      "to": "elbow",
+      "safe": [
+        0.35,
+        0.7
+      ],
+      "forbidNearFrom": 0.1,
+      "forbidNearTo": 0.12
+    },
+    "forearm": {
+      "from": "elbow",
+      "to": "wrist",
+      "safe": [
+        0.3,
+        0.7
+      ],
+      "forbidNear": 0.1
+    },
+    "waist": {
+      "from": "shoulder",
+      "to": "hip",
+      "safe": [
+        0.75,
+        0.9
+      ]
+    },
+    "thigh": {
+      "from": "hip",
+      "to": "knee",
+      "safe": [
+        0.4,
+        0.7
+      ],
+      "preferred": [
+        0.55,
+        0.7
+      ],
+      "forbidNearTo": 0.15
+    },
+    "shin": {
+      "from": "knee",
+      "to": "ankle",
+      "safe": [
+        0.3,
+        0.65
+      ],
+      "forbidNear": 0.15
+    },
+    "belowFeet": {
+      "minGapBelowFeet": 0.03
+    },
+    "crownTightCrop": {
+      "maxAboveFaceTopFracHeadH": 0.15,
+      "requiresHeadHOver": 0.45
+    },
+    "forbidChinBandFracHeadH": 0.1
+  },
+  "shots": {
+    "closeUp": {
+      "bottomBands": [
+        "upperArm"
+      ],
+      "ratios": {
+        "4:5": {
+          "eyeY": [
+            0.269,
+            0.432
+          ],
+          "headroom": [
+            0.0,
+            0.138
+          ],
+          "headH": [
+            0.38,
+            0.5
+          ],
+          "_n": 48,
+          "_calibrated": [
+            "eyeY",
+            "headroom",
+            "subjH"
+          ],
+          "subjH": [
+            0.862,
+            1.0
+          ],
+          "faceH_chinToFaceTop": [
+            0.268,
+            0.513
+          ]
+        },
+        "3:4": {
+          "eyeY": [
+            0.264,
+            0.416
+          ],
+          "headroom": [
+            0.0,
+            0.123
+          ],
+          "headH": [
+            0.36,
+            0.48
+          ],
+          "_n": 45,
+          "_calibrated": [
+            "eyeY",
+            "headroom",
+            "subjH"
+          ],
+          "subjH": [
+            0.877,
+            1.0
+          ],
+          "faceH_chinToFaceTop": [
+            0.278,
+            0.507
+          ]
+        },
+        "9:16": {
+          "eyeY": [
+            0.277,
+            0.417
+          ],
+          "headroom": [
+            0.0,
+            0.125
+          ],
+          "headH": [
+            0.3,
+            0.42
+          ],
+          "_n": 41,
+          "_calibrated": [
+            "eyeY",
+            "headroom",
+            "subjH"
+          ],
+          "subjH": [
+            0.875,
+            1.0
+          ],
+          "faceH_chinToFaceTop": [
+            0.284,
+            0.504
+          ]
+        }
+      }
+    },
+    "halfBody": {
+      "bottomBands": [
+        "waist",
+        "forearm"
+      ],
+      "ratios": {
+        "4:5": {
+          "eyeY": [
+            0.19,
+            0.386
+          ],
+          "headroom": [
+            0.04,
+            0.239
+          ],
+          "_n": 21,
+          "_calibrated": [
+            "eyeY",
+            "headroom",
+            "subjH"
+          ],
+          "subjH": [
+            0.761,
+            0.96
+          ],
+          "faceH_chinToFaceTop": [
+            0.19,
+            0.266
+          ]
+        },
+        "3:4": {
+          "eyeY": [
+            0.196,
+            0.38
+          ],
+          "headroom": [
+            0.04,
+            0.242
+          ],
+          "_n": 24,
+          "_calibrated": [
+            "eyeY",
+            "headroom",
+            "subjH"
+          ],
+          "subjH": [
+            0.758,
+            0.96
+          ],
+          "faceH_chinToFaceTop": [
+            0.179,
+            0.276
+          ]
+        },
+        "9:16": {
+          "eyeY": [
+            0.222,
+            0.383
+          ],
+          "headroom": [
+            0.046,
+            0.249
+          ],
+          "_n": 23,
+          "_calibrated": [
+            "eyeY",
+            "headroom",
+            "subjH"
+          ],
+          "subjH": [
+            0.751,
+            0.954
+          ],
+          "faceH_chinToFaceTop": [
+            0.191,
+            0.29
+          ]
+        }
+      }
+    },
+    "threeQuarter": {
+      "bottomBands": [
+        "thigh",
+        "shin"
+      ],
+      "ratios": {
+        "4:5": {
+          "eyeY": [
+            0.118,
+            0.339
+          ],
+          "headroom": [
+            0.04,
+            0.277
+          ],
+          "_n": 57,
+          "_calibrated": [
+            "eyeY",
+            "headroom",
+            "subjH"
+          ],
+          "subjH": [
+            0.723,
+            0.96
+          ],
+          "faceH_chinToFaceTop": [
+            0.089,
+            0.169
+          ]
+        },
+        "3:4": {
+          "eyeY": [
+            0.11,
+            0.378
+          ],
+          "headroom": [
+            0.037,
+            0.288
+          ],
+          "_n": 47,
+          "_calibrated": [
+            "eyeY",
+            "headroom",
+            "subjH"
+          ],
+          "subjH": [
+            0.712,
+            0.963
+          ],
+          "faceH_chinToFaceTop": [
+            0.089,
+            0.157
+          ]
+        },
+        "9:16": {
+          "eyeY": [
+            0.134,
+            0.364
+          ],
+          "headroom": [
+            0.034,
+            0.28
+          ],
+          "_n": 33,
+          "_calibrated": [
+            "eyeY",
+            "headroom",
+            "subjH"
+          ],
+          "subjH": [
+            0.72,
+            0.966
+          ],
+          "faceH_chinToFaceTop": [
+            0.09,
+            0.16
+          ]
+        }
+      }
+    },
+    "fullBody": {
+      "bottomBands": [
+        "belowFeet"
+      ],
+      "footRoomToHeadroom": [
+        0.6,
+        1.0
+      ],
+      "ratios": {
+        "4:5": {
+          "eyeY": [
+            0.11,
+            0.37
+          ],
+          "headroom": [
+            0.04,
+            0.297
+          ],
+          "footRoom": [
+            0.008,
+            0.129
+          ],
+          "subjH": [
+            0.646,
+            0.934
+          ],
+          "_n": 24,
+          "_calibrated": [
+            "eyeY",
+            "headroom",
+            "subjH",
+            "footRoom"
+          ],
+          "faceH_chinToFaceTop": [
+            0.068,
+            0.111
+          ]
+        },
+        "3:4": {
+          "eyeY": [
+            0.111,
+            0.3
+          ],
+          "headroom": [
+            0.04,
+            0.243
+          ],
+          "footRoom": [
+            0.005,
+            0.128
+          ],
+          "subjH": [
+            0.67,
+            0.944
+          ],
+          "_n": 32,
+          "_calibrated": [
+            "eyeY",
+            "headroom",
+            "subjH",
+            "footRoom"
+          ],
+          "faceH_chinToFaceTop": [
+            0.074,
+            0.127
+          ]
+        },
+        "9:16": {
+          "eyeY": [
+            0.103,
+            0.298
+          ],
+          "headroom": [
+            0.028,
+            0.21
+          ],
+          "footRoom": [
+            0.012,
+            0.12
+          ],
+          "subjH": [
+            0.697,
+            0.941
+          ],
+          "_n": 48,
+          "_calibrated": [
+            "eyeY",
+            "headroom",
+            "subjH",
+            "footRoom"
+          ],
+          "faceH_chinToFaceTop": [
+            0.071,
+            0.119
+          ]
+        }
+      }
+    },
+    "environment": {
+      "bottomBands": [
+        "belowFeet"
+      ],
+      "modeSwitchSubjH": 0.45,
+      "maxFeetBottom": 0.92,
+      "ratios": {
+        "4:5": {
+          "subjH": [
+            0.35,
+            0.6
+          ],
+          "eyeY": [
+            0.28,
+            0.4
+          ],
+          "feetOnLowerThird": [
+            0.62,
+            0.72
+          ],
+          "_n": 9
+        },
+        "3:4": {
+          "subjH": [
+            0.445,
+            0.587
+          ],
+          "eyeY": [
+            0.274,
+            0.402
+          ],
+          "feetOnLowerThird": [
+            0.62,
+            0.72
+          ],
+          "_n": 11,
+          "_calibrated": [
+            "eyeY",
+            "subjH"
+          ],
+          "faceH_chinToFaceTop": [
+            0.05,
+            0.103
+          ]
+        },
+        "9:16": {
+          "subjH": [
+            0.364,
+            0.585
+          ],
+          "eyeY": [
+            0.277,
+            0.512
+          ],
+          "feetOnLowerThird": [
+            0.62,
+            0.72
+          ],
+          "_n": 14,
+          "_calibrated": [
+            "eyeY",
+            "subjH"
+          ],
+          "faceH_chinToFaceTop": [
+            0.033,
+            0.102
+          ]
+        }
+      }
+    }
+  },
+  "hysteresis": {
+    "smoothing": {
+      "type": "ema",
+      "alpha": 0.3
+    },
+    "eyeY": {
+      "enter": 0.03,
+      "exit": 0.015
+    },
+    "headroom": {
+      "enter": 0.02,
+      "exit": 0.01
+    },
+    "centerX": {
+      "enter": 0.04,
+      "exit": 0.02
+    },
+    "cropBandMs": 300,
+    "hintDwellMs": 400,
+    "hintGapMs": 1200,
+    "shotClassHoldMs": 800,
+    "readyHoldMs": 500,
+    "priority": [
+      "outOfFrame",
+      "jointCrop",
+      "headroomEye",
+      "horizontal",
+      "level"
+    ]
+  },
+  "calibration": {
+    "dataset": "Wikimedia Commons, captured>=2000, see manifest.csv",
+    "method": "P10-P90 of measured photos; field kept from v0.1 (evidence P) when n<10",
+    "stats_file": "stats.json"
+  }
+}

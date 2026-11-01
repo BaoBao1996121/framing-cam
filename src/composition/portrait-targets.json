@@ -1,0 +1,104 @@
+{
+  "version": "0.1.0",
+  "units": "normalized_crop",
+  "evidence_note": "S=sourced, D=derived, P=proposed; see docs/portrait-composition-spec.md. Proposed numbers live only in this file.",
+  "landmarks": {
+    "eye": { "pose": [2, 5], "faceMesh": [468, 473], "fallbackFaceMesh": [33, 263] },
+    "chin": { "faceMesh": [152] },
+    "faceTop": { "faceMesh": [10] },
+    "headTopFromFace": {
+      "faceTopMinusChinToFaceTopRatio": 0.47,
+      "p10_p90": [0.159, 0.695],
+      "evidence": "calibrated fallback; primary source is the segmentation mask"
+    },
+    "shoulder": [11, 12],
+    "elbow": [13, 14],
+    "wrist": [15, 16],
+    "hip": [23, 24],
+    "knee": [25, 26],
+    "ankle": [27, 28],
+    "feet": [29, 30, 31, 32],
+    "ears": [7, 8],
+    "nose": 0,
+    "waistFromHip": { "towardShoulder": 0.25, "evidence": "P" },
+    "minSegmentFracHead": 0.75,
+    "minVisibility": 0.5
+  },
+  "horizontal": {
+    "frontalYawMax": 0.15,
+    "frontalCenterX": [0.46, 0.54],
+    "leadRoom": 0.05,
+    "turnedFaceX": { "facingRight": [0.45, 0.45], "facingLeft": [0.55, 0.55] },
+    "wideThirdsX": { "facingRight": [0.283, 0.383], "facingLeft": [0.617, 0.717] },
+    "sideMarginMin": 0.04,
+    "kissingThreshold": 0.02
+  },
+  "cropBands": {
+    "upperArm": { "from": "shoulder", "to": "elbow", "safe": [0.35, 0.7], "forbidNearFrom": 0.1, "forbidNearTo": 0.12 },
+    "chest": { "from": "shoulder", "to": "hip", "safe": [0.1, 0.55], "minDropFracHead": 0.2 },
+    "forearm": { "from": "elbow", "to": "wrist", "safe": [0.3, 0.7], "forbidNear": 0.1 },
+    "waist": { "from": "shoulder", "to": "hip", "safe": [0.75, 0.9] },
+    "thigh": { "from": "hip", "to": "knee", "safe": [0.4, 0.7], "preferred": [0.55, 0.7], "forbidNearTo": 0.15 },
+    "shin": { "from": "knee", "to": "ankle", "safe": [0.3, 0.65], "forbidNear": 0.15 },
+    "belowFeet": { "minGapBelowFeet": 0.03 },
+    "crownTightCrop": { "maxAboveFaceTopFracHeadH": 0.15, "requiresHeadHOver": 0.45 },
+    "forbidChinBandFracHeadH": 0.1
+  },
+  "shots": {
+    "closeUp": {
+      "bottomBands": ["chest"],
+      "ratios": {
+        "4:5": { "eyeY": [0.33, 0.38], "headroom": [0.03, 0.08], "headH": [0.38, 0.5] },
+        "3:4": { "eyeY": [0.33, 0.38], "headroom": [0.03, 0.08], "headH": [0.36, 0.48] },
+        "9:16": { "eyeY": [0.35, 0.4], "headroom": [0.04, 0.1], "headH": [0.3, 0.42] }
+      }
+    },
+    "halfBody": {
+      "bottomBands": ["waist", "forearm"],
+      "ratios": {
+        "4:5": { "eyeY": [0.3, 0.36], "headroom": [0.06, 0.12] },
+        "3:4": { "eyeY": [0.3, 0.36], "headroom": [0.06, 0.12] },
+        "9:16": { "eyeY": [0.32, 0.38], "headroom": [0.07, 0.14] }
+      }
+    },
+    "threeQuarter": {
+      "bottomBands": ["thigh", "shin"],
+      "ratios": {
+        "4:5": { "eyeY": [0.25, 0.32], "headroom": [0.07, 0.13] },
+        "3:4": { "eyeY": [0.25, 0.32], "headroom": [0.07, 0.13] },
+        "9:16": { "eyeY": [0.27, 0.34], "headroom": [0.08, 0.15] }
+      }
+    },
+    "fullBody": {
+      "bottomBands": ["belowFeet"],
+      "footRoomToHeadroom": [0.6, 1.0],
+      "ratios": {
+        "4:5": { "eyeY": [0.14, 0.22], "headroom": [0.05, 0.12], "footRoom": [0.04, 0.1], "subjH": [0.78, 0.9] },
+        "3:4": { "eyeY": [0.14, 0.22], "headroom": [0.05, 0.12], "footRoom": [0.04, 0.1], "subjH": [0.78, 0.9] },
+        "9:16": { "eyeY": [0.16, 0.24], "headroom": [0.06, 0.13], "footRoom": [0.05, 0.11], "subjH": [0.75, 0.88] }
+      }
+    },
+    "environment": {
+      "bottomBands": ["belowFeet"],
+      "modeSwitchSubjH": 0.45,
+      "maxFeetBottom": 0.92,
+      "ratios": {
+        "4:5": { "subjH": [0.35, 0.6], "eyeY": [0.28, 0.4], "feetOnLowerThird": [0.62, 0.72] },
+        "3:4": { "subjH": [0.35, 0.6], "eyeY": [0.28, 0.4], "feetOnLowerThird": [0.62, 0.72] },
+        "9:16": { "subjH": [0.3, 0.55], "eyeY": [0.28, 0.4], "feetOnLowerThird": [0.62, 0.72] }
+      }
+    }
+  },
+  "hysteresis": {
+    "smoothing": { "type": "oneEuro", "alpha": 0.3, "minCutoff": 1.2, "beta": 0.02 },
+    "eyeY": { "enter": 0.03, "exit": 0.015 },
+    "headroom": { "enter": 0.02, "exit": 0.01 },
+    "centerX": { "enter": 0.04, "exit": 0.02 },
+    "cropBandMs": 300,
+    "hintDwellMs": 400,
+    "hintGapMs": 1200,
+    "shotClassHoldMs": 800,
+    "readyHoldMs": 500,
+    "priority": ["outOfFrame", "jointCrop", "headroomEye", "horizontal", "level"]
+  }
+}

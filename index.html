@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#16130f" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="description" content="手机浏览器里的人像构图相机。朋友拿着手机，画面会告诉他怎么移动。" />
+    <title>构图相机 · Framing Cam</title>
+    <link rel="icon" href="%BASE_URL%favicon.svg" type="image/svg+xml" />
+  </head>
+  <body>
+    <div id="app">
+      <section id="gate" class="screen">
+        <div class="gate-card">
+          <p id="kicker" class="kicker"></p>
+          <h1 id="title"></h1>
+          <p id="lede" class="lede"></p>
+          <ol id="steps"></ol>
+          <div class="gate-actions">
+            <button id="open-camera" class="primary" type="button"></button>
+            <button id="open-demo" class="ghost" type="button"></button>
+          </div>
+          <p id="privacy" class="fine"></p>
+          <div class="gate-meta">
+            <button id="lang" class="texty" type="button"></button>
+            <button id="open-about" class="texty" type="button"></button>
+          </div>
+        </div>
+      </section>
+
+      <section id="live" class="screen" hidden>
+        <video id="video" class="preview" playsinline autoplay muted></video>
+        <canvas id="demo" class="preview" hidden></canvas>
+        <canvas id="overlay"></canvas>
+        <div id="flash"></div>
+        <div id="scorebar" class="scorebar" aria-hidden="true"><span id="scorefill"></span></div>
+        <header class="topbar">
+          <div id="modes" class="segments" role="group"></div>
+          <div id="aspects" class="segments" role="group"></div>
+        </header>
+        <p id="preparing" class="prep-chip" hidden></p>
+        <form id="style-bar" class="style-bar">
+          <input id="style-input" type="text" maxlength="80" enterkeyhint="done" />
+          <button id="mic" class="mic" type="button"></button>
+        </form>
+        <p id="vision-status" class="vision-status" hidden></p>
+        <p id="flow" class="flow" hidden></p>
+        <div id="plans" class="plans" hidden></div>
+        <p id="stale" class="stale" hidden></p>
+        <p id="prompt" role="status" aria-live="polite"></p>
+        <button id="debug-toggle" class="debug-toggle" type="button" aria-label="检测状态"></button>
+        <pre id="debug" class="debug" hidden></pre>
+        <footer class="bottombar">
+          <div class="chip-col">
+            <button id="auto" class="chip" type="button" aria-pressed="true"></button>
+          </div>
+          <button id="shutter" type="button">
+            <span id="shutter-label" class="sr-only"></span>
+            <svg class="align-ring" viewBox="0 0 88 88" aria-hidden="true">
+              <circle cx="44" cy="44" r="40"></circle>
+            </svg>
+            <span class="shutter-core"></span>
+          </button>
+          <div id="demo-pad" class="pad" hidden></div>
+        </footer>
+        <p id="badge" class="badge" hidden></p>
+      </section>
+
+      <section id="review" class="screen" hidden>
+        <img id="review-img" alt="" />
+        <div class="review-panel">
+          <p id="review-note"></p>
+          <div id="review-aspects" class="segments" role="group"></div>
+          <div class="review-actions">
+            <button id="retake" class="ghost" type="button"></button>
+            <button id="save" class="primary" type="button"></button>
+            <button id="save-all" class="ghost" type="button"></button>
+          </div>
+          <p id="save-hint" class="fine"></p>
+        </div>
+      </section>
+    </div>
+    <dialog id="about">
+      <p id="about-credit"></p>
+      <p id="about-how"></p>
+      <button id="about-close" class="primary" type="button"></button>
+    </dialog>
+    <p id="toast" role="alert" hidden></p>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

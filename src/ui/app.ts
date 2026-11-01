@@ -1,9 +1,16 @@
 import { attachCamera, grabInferenceBitmap, stopStream, type Facing } from "../camera/stream";
-import { ASPECT_IDS, type AspectId, type FramePlan, type LlmSuggestion, type Subject } from "../composition/types";
+import { ASPECTS, ASPECT_IDS, type AspectId, type FramePlan, type GuidanceCode, type LlmSuggestion, type Rect, type Subject } from "../composition/types";
+import { frameAroundTarget } from "../composition/geometry";
 import { planFrame, stabilizeGuidance, type GuidanceMemory } from "../composition/plan";
-import { assignIds, detectSubjects, selectSubject, smoothSubject, type TrackPoint } from "../composition/subject";
+import { assignIds, detectSubjects, selectSubject, smoothSubject, subjectRegion, type TrackPoint } from "../composition/subject";
 import { AutoShutter, SteadyDetector } from "../composition/steady";
-import { cloudAvailable, requestCloudCrop } from "../cloud/client";
+import { cloudAvailable, requestShotPlans } from "../cloud/client";
+import { initialGuide, stepGuide, type GuideMemory as ShotGuideMemory } from "../guidance/machine";
+import { compositionScore, meanLuminance, smoothScore } from "../guidance/quality";
+import { laplacianVariance, pickSharpest } from "../guidance/sharpness";
+import { planIsStale } from "../guidance/stale";
+import { fallbackPlans } from "../plans/fallback";
+import type { ShotPlan } from "../plans/types";
 import { applyGuidance, DEMO_HEIGHT, DEMO_START, DEMO_WIDTH, subjectFromDemo, type DemoState } from "../demo/person";
 import { drawDemo } from "../demo/draw";
 import { copyFor, readLocale, storeLocale, type LocaleId } from "../i18n";
@@ -15,6 +22,13 @@ import { coverTransform, screenToImage } from "../composition/geometry";
 import { drawOverlay } from "./overlay";
 import { vendorUrl, VisionClient } from "../vision/client";
 
+type SpeechRec = {
+  lang: string;
+  start: () => void;
+  onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+  onerror: (() => void) | null;
+};
+
 type Mode = "camera" | "demo";
 type ScreenName = "gate" | "live" | "review";
 
@@ -25,6 +39,7 @@ type Shot = {
   subject: Subject | null;
   roll: number | null;
   llm: LlmSuggestion | null;
+  shotPlan: ShotPlan | null;
   mirror: boolean;
   aspect: AspectId;
 };
@@ -81,8 +96,17 @@ class CameraApp {
   private demo: DemoState = { ...DEMO_START };
   private llm: LlmSuggestion | null = null;
   private llmAnchor: { x: number; y: number } | null = null;
-  private lastCloud = 0;
-  private cloudFlight = false;
+  private plans: ShotPlan[] = [];
+  private planIndex = 0;
+  private shotGuide: ShotGuideMemory = initialGuide();
+  private anchorBox: Rect | null = null;
+  private missingSince: number | null = null;
+  private countdownMs = 0;
+  private countdownEnds = 0;
+  private snaps: { canvas: HTMLCanvasElement; score: number; at: number }[] = [];
+  private lastSnap = 0;
+  private lastQuality = 0;
+  private analyzing = false;
   private shot: Shot | null = null;
   private reviewUrl = "";
 
@@ -136,8 +160,14 @@ class CameraApp {
     must<HTMLButtonElement>("auto").addEventListener("click", () => {
       this.auto = !this.auto;
       this.autoShutter = new AutoShutter();
+      this.countdownEnds = 0;
       this.applyToggles();
     });
+    must<HTMLFormElement>("style-bar").addEventListener("submit", (event) => {
+      event.preventDefault();
+      void this.analyze();
+    });
+    must<HTMLButtonElement>("mic").addEventListener("click", () => this.listen());
     this.shutterButton.addEventListener("click", () => this.capture());
     must<HTMLButtonElement>("retake").addEventListener("click", () => this.show("live"));
     must<HTMLButtonElement>("save").addEventListener("click", () => void this.save(false));
@@ -169,6 +199,12 @@ class CameraApp {
     text("retake", this.copy.retake);
     text("save", this.copy.save);
     text("save-all", this.copy.saveAll);
+    text("analyze", this.copy.analyze);
+    text("mic", this.copy.listen);
+    text("stale", this.copy.stale);
+    const styleInput = document.getElementById("style-input");
+    if (styleInput instanceof HTMLInputElement) styleInput.placeholder = this.copy.stylePlaceholder;
+    this.renderCounts();
     const steps = must<HTMLElement>("steps");
     steps.replaceChildren();
     this.copy.steps.forEach((step, index) => {
@@ -329,6 +365,11 @@ class CameraApp {
     this.selectedId = null;
     this.llm = null;
     this.llmAnchor = null;
+    this.plans = [];
+    this.planIndex = 0;
+    this.anchorBox = null;
+    this.snaps = [];
+    this.renderPlanCards();
     this.steady.reset();
     this.autoShutter = new AutoShutter();
     this.guidanceMemory = null;
@@ -389,10 +430,169 @@ class CameraApp {
     if (subject) this.steady.pushLandmark(performance.now(), subject.eye.x, subject.eye.y);
   }
 
+  private renderCounts(): void {
+    const counts = document.getElementById("counts");
+    if (!counts) return;
+    counts.replaceChildren();
+    const options: [number, string][] = [
+      [0, this.copy.countdownNow],
+      [1000, this.copy.countdown1],
+      [3000, this.copy.countdown3],
+    ];
+    for (const [ms, label] of options) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = label;
+      button.setAttribute("aria-pressed", String(this.countdownMs === ms));
+      button.addEventListener("click", () => {
+        this.countdownMs = ms;
+        this.countdownEnds = 0;
+        this.renderCounts();
+      });
+      counts.append(button);
+    }
+  }
+
+  private listen(): void {
+    const input = document.getElementById("style-input");
+    const Ctor = (window as unknown as { SpeechRecognition?: new () => SpeechRec; webkitSpeechRecognition?: new () => SpeechRec }).SpeechRecognition
+      || (window as unknown as { webkitSpeechRecognition?: new () => SpeechRec }).webkitSpeechRecognition;
+    if (!Ctor || !(input instanceof HTMLInputElement)) {
+      this.showToast(this.copy.noSpeech);
+      return;
+    }
+    const recognition = new Ctor();
+    recognition.lang = this.locale === "en" ? "en-US" : "zh-CN";
+    recognition.onresult = (event) => {
+      input.value = event.results[0][0].transcript;
+    };
+    recognition.onerror = () => this.showToast(this.copy.noSpeech);
+    recognition.start();
+  }
+
+  private zoomRange(): { min: number; max: number; current: number } {
+    const track = this.stream?.getVideoTracks()[0];
+    const caps = track?.getCapabilities?.() as { zoom?: { min?: number; max?: number } } | undefined;
+    const settings = track?.getSettings?.() as { zoom?: number } | undefined;
+    return { min: caps?.zoom?.min ?? 1, max: caps?.zoom?.max ?? 1, current: settings?.zoom ?? 1 };
+  }
+
+  private async analyze(): Promise<void> {
+    if (this.analyzing) return;
+    this.analyzing = true;
+    const input = document.getElementById("style-input");
+    const style = input instanceof HTMLInputElement && input.value.trim() ? input.value.trim() : "自然";
+    const subject = selectSubject(this.subjects, this.selectedId);
+    const box = subject ? subjectRegion(subject) : null;
+    const source = this.currentSource();
+    let plans: ShotPlan[] | null = null;
+    if (this.cloudOk && source) {
+      plans = await requestShotPlans({
+        imageDataUrl: snapshotDataUrl(source.canvas, source.width, source.height),
+        aspect: this.aspect,
+        imageWidth: source.width,
+        imageHeight: source.height,
+        locale: this.locale,
+        style,
+        rollDeg: this.mode === "demo" ? this.demo.roll : this.motion.roll(),
+        zoom: this.zoomRange(),
+        subject: subject
+          ? {
+              box,
+              eyeX: subject.eye.x,
+              eyeY: subject.eye.y,
+              headTop: subject.headTop,
+              chinY: subject.chinY,
+              yaw: subject.yaw,
+              shouldersY: subject.shouldersY,
+              joints: subject.joints,
+            }
+          : null,
+      });
+    }
+    this.plans = plans && plans.length >= 2 ? plans : fallbackPlans(style, box);
+    this.planIndex = 0;
+    this.anchorBox = box;
+    this.shotGuide = initialGuide(performance.now());
+    this.missingSince = null;
+    this.countdownEnds = 0;
+    this.renderPlanCards();
+    this.analyzing = false;
+  }
+
+  private renderPlanCards(): void {
+    const row = document.getElementById("plans");
+    if (!row) return;
+    row.hidden = this.plans.length === 0;
+    row.replaceChildren();
+    this.plans.forEach((plan, index) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "plan-card";
+      button.setAttribute("aria-pressed", String(index === this.planIndex));
+      const title = document.createElement("strong");
+      title.textContent = plan.title;
+      const detail = document.createElement("span");
+      detail.textContent = `${plan.holderDirection} · ${plan.poseTip}`;
+      button.append(title, detail);
+      button.addEventListener("click", () => {
+        this.planIndex = index;
+        this.shotGuide = initialGuide(performance.now());
+        this.renderPlanCards();
+      });
+      row.append(button);
+    });
+    document.body.dataset.plans = String(this.plans.length);
+  }
+
+  private rememberFrame(time: number): void {
+    if (time - this.lastSnap < 160) return;
+    const source = this.currentSource();
+    if (!source) return;
+    this.lastSnap = time;
+    const probe = document.createElement("canvas");
+    probe.width = 64;
+    probe.height = 64;
+    const context = probe.getContext("2d", { willReadFrequently: true });
+    if (!context) return;
+    context.drawImage(source.canvas, 0, 0, 64, 64);
+    const pixels = context.getImageData(0, 0, 64, 64);
+    const copy = document.createElement("canvas");
+    copy.width = source.width;
+    copy.height = source.height;
+    copy.getContext("2d")?.drawImage(source.canvas, 0, 0);
+    this.snaps.push({ canvas: copy, score: laplacianVariance(pixels.data, 64, 64), at: time });
+    if (this.snaps.length > 5) this.snaps.shift();
+    if (time - this.lastQuality > 280) {
+      this.lastQuality = time;
+      const quality = compositionScore({
+        subject: this.anchorBox,
+        luminance: meanLuminance(pixels.data),
+        rollDeg: this.mode === "demo" ? this.demo.roll : this.motion.roll(),
+      });
+      if (laplacianVariance(pixels.data, 64, 64) < 30) quality.warnings.unshift("blur");
+      const warnings = document.getElementById("warnings");
+      if (warnings) {
+        const labels: Record<string, string> = {
+          blur: this.copy.warnBlur,
+          tilt: this.copy.warnTilt,
+          horizon: this.copy.warnHorizon,
+          dark: this.copy.warnDark,
+          bright: this.copy.warnBright,
+        };
+        warnings.textContent = quality.warnings.map((warning) => labels[warning]).join(" · ");
+      }
+      this.smoothed = smoothScore(this.smoothed, quality.score);
+    }
+  }
+
+  private smoothed: number | null = null;
+
   private render(time: number): void {
     const width = this.imageWidth;
     const height = this.imageHeight;
     if (width < 2 || height < 2 || !this.overlayCtx) return;
+    this.rememberFrame(time);
     const subject = selectSubject(this.subjects, this.selectedId);
     if (subject && this.llmAnchor && Math.hypot(subject.eye.x - this.llmAnchor.x, subject.eye.y - this.llmAnchor.y) > 0.08) {
       this.llm = null;
@@ -410,17 +610,67 @@ class CameraApp {
       mirror: this.mirror,
       llm: this.cloudWanted && this.cloudOk ? this.llm : null,
     });
-    this.rawGuidance = plan.guidance;
-    const stable = stabilizeGuidance(this.guidanceMemory, plan.guidance);
-    this.guidanceMemory = stable.memory;
-    this.prompt.textContent = this.copy.guidance[stable.code];
-    this.prompt.dataset.tone = plan.guidance === "ready" ? "ready" : plan.guidance === "closer" || plan.guidance === "back" ? "warn" : "move";
+    const active = this.plans[this.planIndex];
+    const region = subject ? subjectRegion(subject) : null;
+    const roll = this.mode === "demo" ? this.demo.roll : this.motion.roll();
+    let guideTarget: Rect | null = null;
+    let guideAligned = false;
+    let promptCode: GuidanceCode = plan.guidance;
+    let promptText = "";
+    let bar = plan.alignment;
+    let readyNow = plan.ready;
+    if (active) {
+      if (!region) this.missingSince = this.missingSince ?? time;
+      else this.missingSince = null;
+      const missing = this.missingSince == null ? 0 : time - this.missingSince;
+      const stale = this.anchorBox ? planIsStale(this.anchorBox, region, active.targetBox, missing) : false;
+      const staleEl = document.getElementById("stale");
+      if (staleEl) staleEl.hidden = !stale;
+      const step = stepGuide(this.shotGuide, { now: time, subject: region, target: active.targetBox, rollDeg: roll, steady });
+      this.shotGuide = step.memory;
+      guideTarget = active.targetBox;
+      guideAligned = step.aligned && !stale;
+      bar = step.score;
+      readyNow = step.hint === "ready" && !stale;
+      promptCode = step.hint === "hold" ? "steady" : step.hint;
+      promptText = stale ? this.copy.stale : this.copy.guidance[promptCode];
+      this.rawGuidance = promptCode;
+      if (this.screen === "live" && this.auto && readyNow) {
+        if (this.countdownMs > 0) {
+          if (!this.countdownEnds) this.countdownEnds = time + this.countdownMs;
+          promptText = String(Math.max(1, Math.ceil((this.countdownEnds - time) / 1000)));
+          if (time >= this.countdownEnds) this.capture();
+        } else {
+          this.capture();
+        }
+      } else {
+        this.countdownEnds = 0;
+      }
+    } else {
+      const staleEl = document.getElementById("stale");
+      if (staleEl) staleEl.hidden = true;
+      this.rawGuidance = plan.guidance;
+      const stable = stabilizeGuidance(this.guidanceMemory, plan.guidance);
+      this.guidanceMemory = stable.memory;
+      promptCode = stable.code;
+      promptText = this.copy.guidance[stable.code];
+      if (this.screen === "live") {
+        const fire = this.autoShutter.update(plan.ready);
+        if (fire && this.auto) this.capture();
+      }
+    }
+    const stableCode = promptCode;
+    this.prompt.textContent = promptText;
+    this.prompt.dataset.tone = readyNow ? "ready" : promptCode === "closer" || promptCode === "back" ? "warn" : "move";
     const hints: string[] = [];
+    if (active) hints.push(active.poseTip);
     if (this.subjects.length > 1) hints.push(this.copy.several);
     if (window.innerWidth > window.innerHeight * 1.08) hints.push(this.copy.rotateHint);
-    this.hint.textContent = hints.join(" · ");
-    this.shutterButton.classList.toggle("ready", plan.ready);
-    this.shutterButton.style.setProperty("--align", plan.alignment.toFixed(3));
+    this.hint.textContent = hints.filter(Boolean).join(" · ");
+    this.shutterButton.classList.toggle("ready", readyNow);
+    this.shutterButton.style.setProperty("--align", bar.toFixed(3));
+    const fill = document.getElementById("scorefill");
+    if (fill) fill.style.width = `${Math.round(bar * 100)}%`;
     drawOverlay(this.overlayCtx, {
       width: this.overlay.clientWidth,
       height: this.overlay.clientHeight,
@@ -429,50 +679,17 @@ class CameraApp {
       mirror: this.mirror,
       plan,
       subjects: this.subjects,
-      roll: this.mode === "demo" ? this.demo.roll : this.motion.roll(),
+      roll,
+      guideTarget,
+      guideAligned,
     });
-    if (this.voice && stable.code !== this.spokenCode) {
-      this.spokenCode = stable.code;
-      speakPrompt(this.copy.guidance[stable.code], this.locale);
+    if (this.voice && stableCode !== this.spokenCode) {
+      this.spokenCode = stableCode;
+      speakPrompt(promptText, this.locale);
     }
-    if (plan.ready && !this.wasReady) pulse(24);
-    this.wasReady = plan.ready;
-    document.body.dataset.guidance = plan.guidance;
-    if (this.screen === "live") {
-      const fire = this.autoShutter.update(plan.ready);
-      if (fire && this.auto) this.capture();
-    }
-    if (subject && steady && this.cloudWanted && this.cloudOk && !this.cloudFlight && time - this.lastCloud > 8000) {
-      if (!this.llmAnchor || Math.hypot(subject.eye.x - this.llmAnchor.x, subject.eye.y - this.llmAnchor.y) > 0.05) {
-        void this.askCloud(width, height, subject, plan);
-      }
-    }
-  }
-
-  private async askCloud(width: number, height: number, subject: Subject, plan: FramePlan): Promise<void> {
-    const source = this.currentSource();
-    if (!source) return;
-    this.cloudFlight = true;
-    this.lastCloud = performance.now();
-    try {
-      const suggestion = await requestCloudCrop({
-        imageDataUrl: snapshotDataUrl(source.canvas, source.width, source.height),
-        aspect: this.aspect,
-        imageWidth: width,
-        imageHeight: height,
-        locale: this.locale,
-        subject,
-        rulesBox: plan.crop,
-      });
-      if (suggestion) {
-        this.llm = suggestion;
-        this.llmAnchor = { x: subject.eye.x, y: subject.eye.y };
-      }
-    } catch {
-      this.showToast(this.copy.cloudFail);
-    } finally {
-      this.cloudFlight = false;
-    }
+    if (readyNow && !this.wasReady) pulse(24);
+    this.wasReady = readyNow;
+    document.body.dataset.guidance = promptCode;
   }
 
   private capture(): void {
@@ -480,14 +697,17 @@ class CameraApp {
     const source = this.currentSource();
     if (!source) return;
     this.capturing = true;
+    const best = pickSharpest(this.snaps.filter((snap) => performance.now() - snap.at < 1200));
+    const chosen = best ?? { canvas: source.canvas };
     const subject = selectSubject(this.subjects, this.selectedId);
     this.shot = {
-      source: source.canvas,
-      width: source.width,
-      height: source.height,
+      source: chosen.canvas,
+      width: chosen.canvas.width,
+      height: chosen.canvas.height,
       subject,
       roll: this.mode === "demo" ? this.demo.roll : this.motion.roll(),
       llm: this.llm,
+      shotPlan: this.plans[this.planIndex] ?? null,
       mirror: this.mirror,
       aspect: this.aspect,
     };
@@ -524,14 +744,17 @@ class CameraApp {
       mirror: false,
       llm: this.shot.llm,
     });
-    const cropped = renderCrop(this.shot.source, this.shot.width, this.shot.height, plan.crop, this.shot.mirror);
+    const crop = this.shot.shotPlan
+      ? frameAroundTarget(this.shot.shotPlan.targetBox, ASPECTS[this.aspect], this.shot.width, this.shot.height)
+      : plan.crop;
+    const cropped = renderCrop(this.shot.source, this.shot.width, this.shot.height, crop, this.shot.mirror);
     if (this.reviewUrl) URL.revokeObjectURL(this.reviewUrl);
     canvasToJpeg(cropped)
       .then((blob) => {
         this.reviewUrl = URL.createObjectURL(blob);
         const image = must<HTMLImageElement>("review-img");
         image.src = this.reviewUrl;
-        const note = [this.copy.framing[plan.framing]];
+        const note = this.shot?.shotPlan ? [this.shot.shotPlan.title, this.shot.shotPlan.holderDirection] : [this.copy.framing[plan.framing]];
         if (!this.shot?.subject) note.unshift(this.copy.noSubjectSave);
         else if (plan.quality === "low") note.push(this.copy.qualityLow);
         else if (plan.quality === "ok") note.push(this.copy.qualityOk);
@@ -559,7 +782,10 @@ class CameraApp {
         steady: true,
         llm: this.shot.llm,
       });
-      const cropped = renderCrop(this.shot.source, this.shot.width, this.shot.height, plan.crop, this.shot.mirror);
+      const crop = this.shot.shotPlan
+        ? frameAroundTarget(this.shot.shotPlan.targetBox, ASPECTS[aspect], this.shot.width, this.shot.height)
+        : plan.crop;
+      const cropped = renderCrop(this.shot.source, this.shot.width, this.shot.height, crop, this.shot.mirror);
       const blob = await canvasToJpeg(cropped);
       const name = `framing-cam-${aspect.replace(":", "x")}.jpg`;
       if (!all) {
@@ -576,7 +802,7 @@ class CameraApp {
 
   private pickSubject(event: PointerEvent): void {
     const target = event.target as HTMLElement | null;
-    if (target?.closest("button")) return;
+    if (target?.closest("button, input, form")) return;
     const width = this.imageWidth;
     const height = this.imageHeight;
     if (width < 2) return;

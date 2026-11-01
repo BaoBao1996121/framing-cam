@@ -44,6 +44,19 @@ export function headHeight(subject: Subject): number {
   return Math.max(0.001, subject.chinY - subject.headTop);
 }
 
+/** The region we compare with a plan's target box: hair through the upper body. */
+export function subjectRegion(subject: Subject): { x: number; y: number; w: number; h: number } {
+  const head = headHeight(subject);
+  const bottom = subject.shouldersY != null ? subject.shouldersY + head * 1.15 : subject.chinY + head * 0.85;
+  const xs = [subject.headLeft, subject.headRight, ...subject.shoulders.map((point) => point.x)];
+  const x = Math.max(0, Math.min(1, Math.min(...xs)));
+  const right = Math.max(0, Math.min(1, Math.max(...xs)));
+  const y = Math.max(0, Math.min(0.92, subject.headTop));
+  const h = Math.max(0.08, Math.min(1 - y, bottom - y));
+  const w = Math.max(0.08, Math.min(1 - x, right - x));
+  return { x, y, w, h };
+}
+
 function usable(point: RawPoint | undefined): point is RawPoint {
   if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return false;
   if (point.visibility != null && point.visibility < VISIBLE) return false;

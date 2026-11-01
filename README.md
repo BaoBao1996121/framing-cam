@@ -29,6 +29,8 @@ On the phone, MediaPipe Pose and Face Landmarker run in a Web Worker at about 15
 - looking room when the nose points to one side
 - the phone held level, using the motion sensors
 
+Type or speak the look you want (氛围感, 搞笑, 唯美, 显腿长) and tap **AI 构图**. You get two to four shot plans and swipe between them. The selected plan's target drives one instruction at a time: distance first, then a ring that turns green when the person is in place. Auto-capture waits until that ring has been green and the phone steady for about half a second, and it keeps a few recent frames so it can keep the sharpest one. If the scene changes away from the plan, it says **画面变了，重新分析**. With no API key, the same plans are built on the phone.
+
 Large errors become a single instruction for the person holding the phone. Small errors are finished by a digital crop. The crop is not allowed to throw away so many pixels that the photo goes soft; past that limit the instruction is **靠近一点**.
 
 The GitHub Pages build never calls a server. Framing, the crop, and the shutter all stay on the phone. Netlify (and the local dev server) can ask a vision model for a tighter crop when `LLM_API_KEY` is set. The box is kept only if it contains the head, matches the aspect ratio, and does not cut a joint. With no key, the button stays off and nothing is uploaded.
@@ -152,6 +154,8 @@ GitHub Pages：[https://baobao1996121.github.io/framing-cam/](https://baobao1996
 - 不在膝盖、手肘、手腕、脚踝或脖子处下刀
 - 鼻子偏向一侧时，给视线留空
 - 用运动传感器把手机摆平
+
+打字或按住「说」，告诉它你想要的感觉（氛围感、搞笑、唯美、显腿长），再点 **AI 构图**。会得到两到四个方案，左右滑动切换。选中的方案决定目标框：先把距离走对，再细调位置，对准时圆环变绿。自动拍摄会等到圆环变绿并且手机稳定约半秒，并在最近几帧里留下更清晰的一张。画面如果偏离了当时分析的内容，会提示 **画面变了，重新分析**。没有密钥时，这些方案改在手机上生成。
 
 偏差大的时候，只给拿手机的人一条指令。剩下的小偏差用数字裁切收干净。裁切不允许丢掉太多像素；超过限度就改口说 **靠近一点**。
 

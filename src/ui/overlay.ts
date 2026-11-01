@@ -1,5 +1,5 @@
 import { coverTransform, normRectToScreen } from "../composition/geometry";
-import type { FramePlan, GuidanceCode, Subject } from "../composition/types";
+import type { FramePlan, GuidanceCode, Rect, Subject } from "../composition/types";
 
 export function drawOverlay(
   context: CanvasRenderingContext2D,
@@ -12,6 +12,8 @@ export function drawOverlay(
     plan: FramePlan;
     subjects: Subject[];
     roll: number | null;
+    guideTarget?: Rect | null;
+    guideAligned?: boolean;
   },
 ): void {
   const { width, height } = input;
@@ -35,6 +37,17 @@ export function drawOverlay(
   context.strokeStyle = color;
   context.lineWidth = 2;
   strokeBrackets(context, box.x, box.y, box.w, box.h);
+
+  if (input.guideTarget) {
+    const ring = normRectToScreen(input.guideTarget, cover, input.mirror);
+    context.save();
+    context.strokeStyle = input.guideAligned ? "#d7ef6a" : "#f0a35e";
+    context.lineWidth = input.guideAligned ? 3 : 2;
+    context.beginPath();
+    context.roundRect(ring.x, ring.y, ring.w, ring.h, Math.min(ring.w, ring.h) * 0.18);
+    context.stroke();
+    context.restore();
+  }
 
   if (!ready && input.plan.guidance !== "searching") {
     const head = input.plan.headTarget;

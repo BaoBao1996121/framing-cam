@@ -72,6 +72,19 @@ export const en = {
   padIn: "In",
   padOut: "Out",
   padTilt: "Tilt",
+  stylePlaceholder: "The look you want, e.g. moody",
+  analyze: "Frame it",
+  listen: "Speak",
+  noSpeech: "Voice input isn't available. Type the look instead.",
+  stale: "The scene changed. Analyze again.",
+  countdownNow: "Now",
+  countdown1: "1s",
+  countdown3: "3s",
+  warnBlur: "Soft",
+  warnTilt: "Tilted",
+  warnHorizon: "Level the phone",
+  warnDark: "Too dark",
+  warnBright: "Too bright",
 } as const;
 
 type Widen<T> = T extends string ? string : { [K in keyof T]: Widen<T[K]> };

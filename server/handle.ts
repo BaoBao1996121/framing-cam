@@ -1,5 +1,7 @@
-import { ASPECTS, type AspectId } from "../src/composition/types";
-import { buildFramingPrompt, coerceFraming, extractJson, type LlmFraming } from "../src/composition/llm";
+import type { AspectId } from "../src/composition/types";
+import { buildPlansPrompt, PLANS_SYSTEM } from "../src/plans/prompt";
+import { repairPlansFromText } from "../src/plans/validate";
+import type { Rect } from "../src/composition/types";
 
 export type LlmEnv = {
   LLM_API_KEY?: string;
@@ -8,15 +10,7 @@ export type LlmEnv = {
   LLM_MODEL?: string;
 };
 
-const SYSTEM = `You refine portrait crop boxes for a phone held by a friend. Reply with JSON only, no markdown:
-{"box":{"x":number,"y":number,"w":number,"h":number},"primaryMove":"left"|"right"|"up"|"down"|"closer"|"back"|"tilt_left"|"tilt_right"|"hold","reasoning":string,"confidence":number}
-Coordinates are normalized to the full image, origin top-left, y down.
-The box must contain the whole head, with a little room above the hair, and the eyes near the upper third of the box.
-Do not let a box edge cut knees, elbows, wrists, or ankles.
-Pixel aspect (w*imageWidth)/(h*imageHeight) must match the requested aspect.
-Prefer chest-up for 4:5 and 3:4, and a slightly longer framing for 9:16.
-If the person is small in the frame, set primaryMove to "closer".
-reasoning is one short sentence in the requested language. confidence is from 0 to 1.`;
+const SYSTEM = PLANS_SYSTEM;
 
 export function llmConfigured(env: LlmEnv): boolean {
   return Boolean(env.LLM_API_KEY?.trim());
@@ -92,16 +86,20 @@ type FrameBody = {
   imageWidth?: number;
   imageHeight?: number;
   locale?: string;
+  style?: string;
+  rollDeg?: number | null;
+  zoom?: { min?: number; max?: number; current?: number };
   subject?: {
-    eyeX: number;
-    eyeY: number;
-    headTop: number;
-    chinY: number;
-    yaw: number;
-    shouldersY: number | null;
-    joints: { name: string; x: number; y: number }[];
+    box?: Rect | null;
+    eyeX?: number;
+    eyeY?: number;
+    headTop?: number;
+    chinY?: number;
+    yaw?: number;
+    shouldersY?: number | null;
+    joints?: { name: string; x: number; y: number }[];
   } | null;
-  rulesBox?: { x: number; y: number; w: number; h: number };
+  rulesBox?: Rect;
 };
 
 function isAspect(value: string): value is AspectId {
@@ -132,7 +130,7 @@ function textFromPayload(payload: unknown): string {
   return "";
 }
 
-async function callModel(env: LlmEnv, userText: string, dataUrl: string): Promise<LlmFraming> {
+async function callModel(env: LlmEnv, userText: string, dataUrl: string): Promise<string> {
   const target = resolveLlmTarget(env);
   const key = env.LLM_API_KEY?.trim() ?? "";
   let response: Response;
@@ -199,9 +197,9 @@ async function callModel(env: LlmEnv, userText: string, dataUrl: string): Promis
   }
   if (!response.ok) throw new Error(`llm_${response.status}`);
   const payload = (await response.json()) as unknown;
-  const framing = coerceFraming(extractJson(textFromPayload(payload)));
-  if (!framing) throw new Error("llm_parse");
-  return framing;
+  const text = textFromPayload(payload);
+  if (!text.trim()) throw new Error("llm_parse");
+  return text;
 }
 
 function pathnameOf(request: Request): string {
@@ -237,19 +235,29 @@ export async function handleApi(request: Request, env: LlmEnv): Promise<Response
   const imageWidth = Number(body.imageWidth);
   const imageHeight = Number(body.imageHeight);
   if (!Number.isFinite(imageWidth) || !Number.isFinite(imageHeight)) return json({ ok: false, error: "bad_size" }, 400);
-  const rulesBox = body.rulesBox ?? { x: 0, y: 0, w: 1, h: 1 };
-  const prompt = buildFramingPrompt({
+  const style = typeof body.style === "string" && body.style.trim() ? body.style.trim().slice(0, 80) : "自然";
+  const locale = body.locale || "zh-CN";
+  const subjectBox = body.subject?.box && typeof body.subject.box === "object" ? body.subject.box : null;
+  const zoom = {
+    min: Number(body.zoom?.min ?? 1) || 1,
+    max: Number(body.zoom?.max ?? 1) || 1,
+    current: Number(body.zoom?.current ?? 1) || 1,
+  };
+  const prompt = buildPlansPrompt({
+    style,
+    locale,
     aspect: body.aspect,
-    aspectValue: ASPECTS[body.aspect],
     imageWidth,
     imageHeight,
-    locale: body.locale || "zh-CN",
+    rollDeg: typeof body.rollDeg === "number" ? body.rollDeg : null,
+    zoom,
     subject: body.subject ?? null,
-    rulesBox,
   });
   try {
-    const framing = await callModel(env, prompt, dataUrl);
-    return json({ ok: true, framing });
+    const text = await callModel(env, prompt, dataUrl);
+    const plans = repairPlansFromText(text, { style, locale, subjectBox });
+    if (plans.length < 2) return json({ ok: false, error: "llm_parse" });
+    return json({ ok: true, plans });
   } catch (error) {
     console.error("frame request failed", error instanceof Error ? error.message : "llm");
     return json({ ok: false, error: "llm_failed" });

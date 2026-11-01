@@ -35,10 +35,19 @@
         <canvas id="demo" class="preview" hidden></canvas>
         <canvas id="overlay"></canvas>
         <div id="flash"></div>
+        <div id="scorebar" class="scorebar" aria-hidden="true"><span id="scorefill"></span></div>
         <header class="topbar">
           <div id="aspects" class="segments" role="group"></div>
           <button id="flip" class="chip" type="button"></button>
         </header>
+        <form id="style-bar" class="style-bar">
+          <input id="style-input" type="text" maxlength="80" enterkeyhint="done" />
+          <button id="mic" class="chip" type="button"></button>
+          <button id="analyze" class="primary slim" type="submit"></button>
+        </form>
+        <div id="plans" class="plans" hidden></div>
+        <p id="stale" class="stale" hidden></p>
+        <p id="warnings" class="warnings"></p>
         <p id="prompt" role="status" aria-live="polite"></p>
         <p id="hint" class="hint"></p>
         <footer class="bottombar">
@@ -46,6 +55,7 @@
             <button id="voice" class="chip" type="button" aria-pressed="false"></button>
             <button id="cloud" class="chip" type="button" aria-pressed="false"></button>
             <button id="auto" class="chip" type="button" aria-pressed="true"></button>
+            <div id="counts" class="segments tiny" role="group"></div>
           </div>
           <button id="shutter" type="button">
             <span id="shutter-label" class="sr-only"></span>

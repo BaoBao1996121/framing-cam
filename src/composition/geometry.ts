@@ -117,6 +117,21 @@ export function digitalZoom(crop: Rect, viewfinder: Rect): number {
   return viewfinder.h / crop.h;
 }
 
+/** A crop of the requested aspect that wraps the plan's target box. */
+export function frameAroundTarget(target: Rect, aspect: number, imageWidth: number, imageHeight: number): Rect {
+  const box = toPx(target, imageWidth, imageHeight);
+  const cx = box.x + box.w / 2;
+  const cy = box.y + box.h / 2;
+  let height = Math.max(box.h * 1.45, (box.w * 1.2) / aspect);
+  let width = height * aspect;
+  if (width < box.w * 1.2) {
+    width = box.w * 1.2;
+    height = width / aspect;
+  }
+  const snapped = snapToAspect({ x: cx - width / 2, y: cy - height / 2, w: width, h: height }, aspect, imageWidth, imageHeight);
+  return toNorm(snapped ?? largestAspectRect(imageWidth, imageHeight, aspect), imageWidth, imageHeight);
+}
+
 export function containsPoint(rect: Rect, point: { x: number; y: number }, margin = 0): boolean {
   return (
     point.x >= rect.x - margin &&

@@ -344,9 +344,116 @@ video.mirror, canvas.preview.mirror { transform: scaleX(-1); }
   stroke-dashoffset: calc(251.3 * (1 - var(--align, 0)));
 }
 
+.scorebar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  z-index: 5;
+  background: rgba(246, 241, 231, 0.16);
+}
+
+#scorefill {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--ready);
+}
+
+.style-bar {
+  position: absolute;
+  z-index: 4;
+  top: calc(54px + env(safe-area-inset-top));
+  left: 12px;
+  right: 12px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.style-bar input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  border-radius: 999px;
+  padding: 11px 14px;
+  background: rgba(22, 19, 15, 0.55);
+  color: var(--ivory);
+  backdrop-filter: blur(12px);
+}
+
+.style-bar input::placeholder { color: rgba(246, 241, 231, 0.62); }
+
+.primary.slim {
+  min-height: 40px;
+  padding: 0 14px;
+  white-space: nowrap;
+}
+
+.plans {
+  position: absolute;
+  z-index: 4;
+  top: calc(104px + env(safe-area-inset-top));
+  left: 0;
+  right: 0;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  padding: 0 12px 4px;
+}
+
+.plan-card {
+  scroll-snap-align: center;
+  flex: 0 0 58%;
+  text-align: left;
+  border-radius: 16px;
+  padding: 10px 12px;
+  background: rgba(22, 19, 15, 0.62);
+  color: var(--ivory);
+  backdrop-filter: blur(12px);
+  border: 1px solid transparent;
+}
+
+.plan-card[aria-pressed="true"] { border-color: var(--ready); }
+
+.plan-card strong { display: block; font-family: var(--serif); font-size: 16px; }
+
+.plan-card span { display: block; margin-top: 4px; font-size: 12px; color: var(--ivory-dim); }
+
+.stale, .warnings {
+  position: absolute;
+  z-index: 4;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  text-align: center;
+}
+
+.stale {
+  top: calc(188px + env(safe-area-inset-top));
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--coral);
+  color: #1a100c;
+  font-weight: 700;
+}
+
+.warnings {
+  top: auto;
+  bottom: calc(196px + env(safe-area-inset-bottom));
+  font-size: 12px;
+  color: #ffd0b8;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
+.segments.tiny button { padding: 6px 8px; font-size: 12px; }
+
 .badge {
   position: absolute;
-  top: calc(58px + env(safe-area-inset-top));
+  top: calc(150px + env(safe-area-inset-top));
   left: 16px;
   margin: 0;
   padding: 4px 8px;

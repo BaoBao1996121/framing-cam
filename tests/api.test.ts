@@ -1,12 +1,53 @@
 import { describe, expect, it } from "vitest";
 import { shouldProbeCloud } from "../src/cloud/client";
 import { buildFramingPrompt } from "../src/composition/llm";
+import { toRequest } from "../api/health";
 import { handleApi, resolveLlmTarget } from "../server/handle";
 
 describe("framing API", () => {
+  it("keeps Origin when the Vercel adapter builds a Request", async () => {
+    const request = await toRequest({
+      method: "POST",
+      url: "/api/frame",
+      headers: {
+        origin: "https://framing-cam.netlify.app",
+        "content-type": "application/json",
+        "x-nf-client-connection-ip": "198.51.100.8",
+      },
+      body: "{}",
+    });
+    expect(request.headers.get("origin")).toBe("https://framing-cam.netlify.app");
+    expect(request.headers.get("x-nf-client-connection-ip")).toBe("198.51.100.8");
+  });
+
   it("reports that no key means rules-only", async () => {
     const response = await handleApi(new Request("http://local/api/health"), {});
     expect(await response.json()).toEqual({ ok: true, llm: false });
+  });
+
+  it("refuses localhost in production and ignores a spoofed forwarded-for", async () => {
+    const blocked = await handleApi(
+      new Request("http://local/api/frame", {
+        method: "POST",
+        headers: { origin: "http://127.0.0.1:5199" },
+        body: "{}",
+      }),
+      { NODE_ENV: "production", LLM_API_KEY: "test-key" },
+    );
+    expect(blocked.status).toBe(403);
+    let allowed = 0;
+    for (let index = 0; index < 12; index += 1) {
+      const response = await handleApi(
+        new Request("http://local/api/frame", {
+          method: "POST",
+          headers: { origin: "https://framing-cam.netlify.app", "x-forwarded-for": `203.0.113.${index}` },
+          body: "{",
+        }),
+        { NODE_ENV: "production", LLM_API_KEY: "test-key" },
+      );
+      if (response.status !== 429) allowed += 1;
+    }
+    expect(allowed).toBeLessThanOrEqual(8);
   });
 
   it("rejects a foreign origin and limits repeated frame calls", async () => {
@@ -22,7 +63,7 @@ describe("framing API", () => {
     expect(denied.status).toBe(403);
     expect(await denied.json()).toMatchObject({ ok: false, error: "origin" });
 
-    const headers = { origin: "http://127.0.0.1:5199", "x-forwarded-for": "203.0.113.10" };
+    const headers = { origin: "http://127.0.0.1:5199", "x-nf-client-connection-ip": "203.0.113.10" };
     let limited = 0;
     for (let index = 0; index < 9; index += 1) {
       const response = await handleApi(new Request("http://local/api/frame", { method: "POST", headers, body: "{" }), env);
@@ -35,6 +76,7 @@ describe("framing API", () => {
     const response = await handleApi(
       new Request("http://local/api/frame", {
         method: "POST",
+        headers: { origin: "http://127.0.0.1:5199" },
         body: JSON.stringify({ imageDataUrl: "data:image/jpeg;base64,aaaa", aspect: "4:5", imageWidth: 10, imageHeight: 10 }),
       }),
       {},

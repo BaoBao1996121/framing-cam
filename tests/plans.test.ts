@@ -23,7 +23,7 @@ describe("shot plan JSON", () => {
     expect(plans.length).toBeLessThanOrEqual(4);
     expect(plans[0].targetBox.x).toBeGreaterThanOrEqual(0);
     expect(plans[0].targetBox.y + plans[0].targetBox.h).toBeLessThanOrEqual(1);
-    expect(plans[0].zoom).toBeLessThanOrEqual(3);
+    expect(plans[0].zoom).toBeLessThanOrEqual(1.6);
     expect(plans[0].confidence).toBeLessThanOrEqual(1);
     expect(plans.some((plan) => plan.title === "坏的")).toBe(false);
   });

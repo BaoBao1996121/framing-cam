@@ -1,18 +1,10 @@
-import { DEFAULT_FRAME, guidanceBox, normalizeShotSize, type ShotSize } from "../composition/intent";
+import { DEFAULT_FRAME, guidanceBox, normalizeShotSize, resolveTarget } from "../composition/intent";
 import { clamp } from "../composition/geometry";
 import { extractJson } from "../composition/llm";
 import { fallbackPlans } from "./fallback";
 import type { PlanContext, ShotPlan } from "./types";
 
 const SHOT_SIZES = new Set(["close", "medium", "three-quarter", "full", "wide", "environmental"]);
-
-const DEFAULT_EYE: Record<ShotSize, number> = {
-  close: 0.32,
-  medium: 0.2902,
-  "three-quarter": 0.24,
-  full: 0.22,
-  wide: 0.2,
-};
 
 function text(value: unknown, max: number, fallback: string): string {
   if (typeof value !== "string") return fallback;
@@ -31,20 +23,19 @@ function repairOne(value: unknown, index: number, context: PlanContext): ShotPla
   const shotSize = text(raw.shotSize, 24, "");
   if (!SHOT_SIZES.has(shotSize)) return null;
   const size = normalizeShotSize(shotSize);
-  const eyeLine = clamp(num(raw.eyeLine) ?? DEFAULT_EYE[size], 0.12, 0.5);
-  const horizontal = clamp(num(raw.horizontal) ?? 0.5, 0.28, 0.72);
-  const headroom = clamp(num(raw.headroom) ?? 0.15, 0, 0.35);
+  const aspect = context.aspect ?? DEFAULT_FRAME.aspect;
+  const solved = resolveTarget({ shotSize: size, eyeLine: num(raw.eyeLine) ?? undefined, horizontal: num(raw.horizontal) ?? undefined, headroom: num(raw.headroom) ?? undefined }, aspect);
   const advice = raw.cameraAdvice && typeof raw.cameraAdvice === "object" ? (raw.cameraAdvice as Record<string, unknown>) : {};
   const styleTag = text(raw.styleTag, 24, context.style || "自然");
   return {
     title: text(raw.title, 32, styleTag || `方案 ${index + 1}`),
     styleTag,
     shotSize,
-    eyeLine,
-    horizontal,
-    headroom,
+    eyeLine: solved.eyeY,
+    horizontal: solved.horizontal,
+    headroom: solved.headroom,
     targetBox: guidanceBox(
-      { shotSize: size, eyeLine, horizontal, headroom },
+      { shotSize: size, eyeLine: solved.eyeY, horizontal: solved.horizontal, headroom: solved.headroom },
       {
         width: context.imageWidth ?? DEFAULT_FRAME.width,
         height: context.imageHeight ?? DEFAULT_FRAME.height,
@@ -56,7 +47,7 @@ function repairOne(value: unknown, index: number, context: PlanContext): ShotPla
       tilt: text(advice.tilt, 40, "保持水平"),
       distance: text(advice.distance, 40, "保持距离"),
     },
-    zoom: clamp(num(raw.zoom) ?? 1, 1, 3),
+    zoom: clamp(num(raw.zoom) ?? 1, 1, 1.6),
     poseTip: text(raw.poseTip, 48, "放松肩膀"),
     holderDirection: text(raw.holderDirection, 48, "把人物放进框里"),
     confidence: clamp(num(raw.confidence) ?? 0.5, 0, 1),

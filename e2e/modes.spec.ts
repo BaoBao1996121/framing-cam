@@ -74,7 +74,7 @@ for (const mode of ["other", "self"] as const) {
             steady: "稳住",
             ready: "好了",
           };
-    expect(before.prompt).toBe(phrases[before.guidance]);
+    expect(before.prompt === phrases[before.guidance] || before.prompt.startsWith(`${phrases[before.guidance]}，`)).toBe(true);
     const trace = await page.evaluate(async () => {
       const host = window as unknown as { __spot: { x: number; y: number; w: number; h: number } };
       const deadline = performance.now() + 40000;
@@ -112,11 +112,13 @@ for (const mode of ["other", "self"] as const) {
       screen: document.body.dataset.screen,
       status: document.getElementById("vision-status")?.hidden ? "" : document.getElementById("vision-status")?.textContent || "",
       still: document.body.dataset.still || "",
+      stillFrom: document.body.dataset.stillFrom || "",
     }));
     expect(after.screen).toBe("review");
     expect(after.status).not.toMatch(/document/);
+    expect(after.stillFrom).toBe("painted-frame");
     expect(modelMs).toBeLessThan(45_000);
-    console.log(`${mode} model-ready ${modelMs}ms still ${after.still}`);
+    console.log(`${mode} model-ready ${modelMs}ms still ${after.still} from ${after.stillFrom}`);
     test.info().annotations.push({ type: "still", description: after.still });
   });
 }

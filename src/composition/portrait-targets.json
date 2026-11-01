@@ -1,6 +1,6 @@
 {
   "version": "0.1.0",
-  "units": "normalized_frame",
+  "units": "normalized_crop",
   "evidence_note": "S=sourced, D=derived, P=proposed; see docs/portrait-composition-spec.md. Proposed numbers live only in this file.",
   "landmarks": {
     "eye": { "pose": [2, 5], "faceMesh": [468, 473], "fallbackFaceMesh": [33, 263] },

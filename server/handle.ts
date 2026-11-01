@@ -2,7 +2,7 @@ import type { AspectId } from "../src/composition/types";
 import { buildPlansPrompt, PLANS_SYSTEM } from "../src/plans/prompt";
 import { repairPlansFromText } from "../src/plans/validate";
 import type { Rect } from "../src/composition/types";
-import { allowlistFromEnv, allowRate, clampText, clientIp, originAllowed, safeSubject } from "./guard";
+import { allowlistFromEnv, allowLocalhost, allowRate, clampText, clientIp, originAllowed, safeSubject } from "./guard";
 
 export type LlmEnv = {
   LLM_API_KEY?: string;
@@ -10,6 +10,8 @@ export type LlmEnv = {
   LLM_BASE_URL?: string;
   LLM_MODEL?: string;
   FRAME_ORIGINS?: string;
+  FRAME_ALLOW_LOCALHOST?: string;
+  NODE_ENV?: string;
 };
 
 const SYSTEM = PLANS_SYSTEM;
@@ -221,11 +223,13 @@ export async function handleApi(request: Request, env: LlmEnv): Promise<Response
   }
   if (pathname !== "/api/frame" && !pathname.endsWith("/api/frame")) return json({ ok: false, error: "not_found" }, 404);
   if (request.method !== "POST") return json({ ok: false, error: "method" }, 405);
-  if (!llmConfigured(env)) return json({ ok: false, error: "unconfigured" });
-  if (!originAllowed(request.headers.get("origin"), allowlistFromEnv(env.FRAME_ORIGINS))) {
+  if (!originAllowed(request.headers.get("origin"), allowlistFromEnv(env.FRAME_ORIGINS), allowLocalhost(env))) {
     return json({ ok: false, error: "origin" }, 403);
   }
+  if (!llmConfigured(env)) return json({ ok: false, error: "unconfigured" });
   if (!allowRate(clientIp(request), Date.now())) return json({ ok: false, error: "rate" }, 429);
+  const declared = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > 1_800_000) return json({ ok: false, error: "too_large" }, 413);
 
   const raw = await request.text();
   if (raw.length > 1_800_000) return json({ ok: false, error: "too_large" }, 413);

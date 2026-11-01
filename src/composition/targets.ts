@@ -56,24 +56,62 @@ export type NagBands = {
   headroom: Range | null;
   faceX: Range;
   subjH: Range | null;
-  /** Chin-to-forehead height, used when the shot has no torso to measure. */
+  /** Head height for a face-only close-up. Always contains the ideal headH when the shot has one. */
+  headH: Range | null;
   faceH: Range | null;
 };
 
+function cover(ideal: Range | null, calibrated: readonly number[] | undefined): Range | null {
+  if (!ideal && !calibrated) return null;
+  if (!ideal) return asRange(calibrated!);
+  if (!calibrated) return ideal;
+  return [Math.min(ideal[0], calibrated[0]), Math.max(ideal[1], calibrated[1])];
+}
+
 type ToleranceCell = { eyeY?: number[]; headroom?: number[]; subjH?: number[]; faceH?: number[]; footRoom?: number[] };
 
-/** No-nag band. Falls back to the spec ideal when a calibrated cell is missing. */
+/** No-nag band. Widened so every ideal range sits inside it. */
 export function nagBands(size: ShotSize, aspect: AspectId, idealEye: Range, idealHead: Range | null, idealSubj: Range | null): NagBands {
   const key = shotKey(size);
   const table = portraitTolerance.shots[key] as Record<string, ToleranceCell>;
   const cell = table[aspect] ?? table["4:5"] ?? {};
-  const faceX = asRange(portraitTolerance.faceX[key]);
+  const ratios = ratiosFor(size, aspect);
+  const idealHeadH = ratios.headH ? asRange(ratios.headH) : null;
+  const k = portraitTargets.landmarks.headTopFromFace.faceTopMinusChinToFaceTopRatio;
+  const derivedHead = cell.faceH ? [cell.faceH[0] * (1 + k), cell.faceH[1] * (1 + k)] : undefined;
+  const lead = portraitTargets.horizontal.leadRoom;
+  const frontal = asRange(portraitTargets.horizontal.frontalCenterX);
+  const faceIdeal: Range = [Math.min(frontal[0], 0.5 - lead), Math.max(frontal[1], 0.5 + lead)];
   return {
-    eyeY: cell.eyeY ? asRange(cell.eyeY) : idealEye,
-    headroom: cell.headroom ? asRange(cell.headroom) : idealHead,
-    faceX,
-    subjH: cell.subjH ? asRange(cell.subjH) : idealSubj,
+    eyeY: cover(idealEye, cell.eyeY) ?? idealEye,
+    headroom: cover(idealHead, cell.headroom),
+    faceX: cover(faceIdeal, portraitTolerance.faceX[key]) ?? faceIdeal,
+    subjH: cover(idealSubj, cell.subjH),
+    headH: cover(idealHeadH, derivedHead),
     faceH: cell.faceH ? asRange(cell.faceH) : null,
+  };
+}
+
+export type IdealBands = {
+  eyeY: Range;
+  headroom: Range | null;
+  subjH: Range | null;
+  headH: Range | null;
+  faceX: Range;
+};
+
+/** The narrow aim. Callers compare this with `nagBands` and require ideal ⊆ tolerance. */
+export function idealBands(size: ShotSize, aspect: AspectId): IdealBands {
+  const ratios = ratiosFor(size, aspect);
+  const headroom = ratios.headroom ? asRange(ratios.headroom) : null;
+  const lead = portraitTargets.horizontal.leadRoom;
+  const frontal = asRange(portraitTargets.horizontal.frontalCenterX);
+  return {
+    eyeY: asRange(ratios.eyeY),
+    headroom,
+    subjH: subjectHeightRange(size, aspect),
+    headH: ratios.headH ? asRange(ratios.headH) : null,
+    faceX: [Math.min(frontal[0], 0.5 - lead), Math.max(frontal[1], 0.5 + lead)],
   };
 }
 

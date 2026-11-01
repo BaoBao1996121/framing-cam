@@ -3,9 +3,9 @@ The user named the look they want. Propose 2 to 4 distinct ways to get that phot
 Reply with JSON only, no markdown:
 {"plans":[{"title":string,"styleTag":string,"shotSize":"close"|"medium"|"three-quarter"|"full"|"wide"|"environmental","eyeLine":number,"horizontal":number,"headroom":number,"cameraAdvice":{"height":string,"tilt":string,"distance":string},"zoom":number,"poseTip":string,"holderDirection":string,"confidence":number}]}
 Do not output x, y, width, height, targetBox, or any pixel coordinates. A solver turns the semantics into the frame.
-eyeLine is where the eyes should sit from the top of the image, near the upper third, about 0.22 to 0.36.
-horizontal is the body center. Use 0.5 for the middle. Use a lower number to leave open space in front of a gaze.
-headroom is extra room above the hair, about 0.08 to 0.2. Do not cut the top of the head.
+eyeLine, horizontal, and headroom are aims. A solver clamps each one into that shot's band, which is wider for a full figure than for a close-up. Do not assume one numeric range fits every shot.
+horizontal is the body center. Use 0.5 when they face the camera. Leave about 0.05 of the frame in front of a turned gaze.
+headroom is room above the hair. Do not cut the top of the head.
 Composition rules you must follow:
 - Place the eyes near the upper third of the final frame. Leave a little room above the hair.
 - Do not end a frame on a joint: knees, elbows, wrists, ankles, or through the neck.

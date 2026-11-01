@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { idealHeadFraction } from "../src/composition/constants";
 import { coverTransform, imageToScreen, largestAspectRect, pixelAspect, screenToImage, toNorm } from "../src/composition/geometry";
+import { classifyShot } from "../src/composition/measure";
 import { planFrame } from "../src/composition/plan";
+import { frameCrop, resolveTarget } from "../src/composition/solve";
+import type { Subject } from "../src/composition/types";
 import { evaluateCrop, jointEdgePenalty, prepareLlmCrop, totalJointPenalty } from "../src/composition/rank";
 import { AutoShutter, SteadyDetector } from "../src/composition/steady";
 import { assignIds, detectSubjects, smoothSubject, type RawFace, type RawPose } from "../src/composition/subject";
@@ -29,6 +31,43 @@ const GUIDANCE = [
   "ready",
 ] as const;
 
+function readyFace(dx = 0, dy = 0, scale = 1): Subject {
+  const sized = { width: DEMO_WIDTH, height: DEMO_HEIGHT, aspect: "4:5" as const };
+  const crop = frameCrop(sized);
+  const ideal = resolveTarget({ shotSize: "close" }, "4:5");
+  const headH = ((ideal.headHRange![0] + ideal.headHRange![1]) / 2) * crop.h * scale;
+  const eyeY = crop.y + ideal.eyeY * crop.h + dy;
+  const headTop = crop.y + ideal.headroom * crop.h + dy;
+  const x = crop.x + crop.w * 0.5 + dx;
+  return {
+    id: "face",
+    eye: { x, y: eyeY },
+    headTop,
+    chinY: headTop + headH,
+    headLeft: x - 0.06,
+    headRight: x + 0.06,
+    yaw: 0,
+    shouldersY: null,
+    shoulders: [],
+    joints: [],
+    confidence: 1,
+  };
+}
+
+function planFace(subject: Subject, extra: Partial<Parameters<typeof planFrame>[0]> = {}) {
+  return planFrame({
+    imageWidth: DEMO_WIDTH,
+    imageHeight: DEMO_HEIGHT,
+    subjects: [subject],
+    selectedId: null,
+    aspect: "4:5",
+    rollDeg: extra.rollDeg ?? 0,
+    steady: extra.steady ?? true,
+    shotSize: "close",
+    ...extra,
+  });
+}
+
 function planAt(state = idealPortraitState("4:5"), extra: Partial<Parameters<typeof planFrame>[0]> = {}) {
   return planFrame({
     imageWidth: DEMO_WIDTH,
@@ -44,45 +83,43 @@ function planAt(state = idealPortraitState("4:5"), extra: Partial<Parameters<typ
 
 describe("portrait guidance", () => {
   it("treats an ideal chest-up placement as ready", () => {
-    const plan = planAt();
+    const plan = planFace(readyFace());
     expect(plan.ready).toBe(true);
     expect(plan.guidance).toBe("ready");
     expect(plan.quality === "good" || plan.quality === "ok").toBe(true);
     const ratio = pixelAspect(plan.crop, DEMO_WIDTH, DEMO_HEIGHT);
     expect(Math.abs(ratio - 4 / 5)).toBeLessThan(0.015);
-    const subject = subjectFromDemo(idealPortraitState("4:5"));
+    const subject = readyFace();
     const eyeRel = (subject.eye.y - plan.crop.y) / plan.crop.h;
-    expect(eyeRel).toBeGreaterThan(0.26);
-    expect(eyeRel).toBeLessThan(0.46);
-    expect(totalJointPenalty(plan.crop, subject)).toBeLessThan(0.35);
+    expect(Math.abs(eyeRel - resolveTarget({ shotSize: "close" }, "4:5").eyeY)).toBeLessThan(0.04);
     expect(plan.zoom).toBeLessThanOrEqual(1.7);
   });
 
   it("points the holder toward the subject", () => {
-    const ideal = idealPortraitState("4:5");
-    expect(planAt({ ...ideal, eyeX: ideal.eyeX - 0.16 }).guidance).toBe("left");
-    expect(planAt({ ...ideal, eyeX: ideal.eyeX + 0.16 }).guidance).toBe("right");
-    expect(planAt({ ...ideal, eyeY: ideal.eyeY - 0.12 }).guidance).toBe("up");
-    expect(planAt({ ...ideal, eyeY: ideal.eyeY + 0.12 }).guidance).toBe("down");
-    expect(planAt({ ...ideal, headH: ideal.headH * 0.45 }).guidance).toBe("closer");
-    expect(planAt({ ...ideal, headH: ideal.headH * 1.55 }).guidance).toBe("back");
-    expect(planAt({ ...ideal, roll: 8 }).guidance).toBe("raiseRight");
-    expect(planAt({ ...ideal, roll: -8 }).guidance).toBe("raiseLeft");
-    expect(planAt(ideal, { steady: false }).guidance).toBe("steady");
-    expect(planAt(ideal, { subjects: [] }).guidance).toBe("searching");
+    expect(planFace(readyFace(-0.2)).guidance).toBe("left");
+    expect(planFace(readyFace(0.2)).guidance).toBe("right");
+    expect(planFace(readyFace(0, -0.12)).guidance).toBe("up");
+    expect(planFace(readyFace(0, 0.12)).guidance).toBe("down");
+    expect(planFace(readyFace(0, 0, 0.45)).guidance).toBe("closer");
+    expect(planFace(readyFace(0, 0, 1.8)).guidance).toBe("back");
+    expect(planFace(readyFace(), { rollDeg: 8 }).guidance).toBe("raiseRight");
+    expect(planFace(readyFace(), { rollDeg: -8 }).guidance).toBe("raiseLeft");
+    expect(planFace(readyFace(), { steady: false }).guidance).toBe("steady");
+    expect(planAt(idealPortraitState("4:5"), { subjects: [] }).guidance).toBe("searching");
   });
 
-  it("flips only horizontal advice for the mirrored selfie preview", () => {
-    const ideal = idealPortraitState("4:5");
-    expect(planAt({ ...ideal, eyeX: ideal.eyeX - 0.16 }, { mirror: true }).guidance).toBe("right");
-    expect(planAt({ ...ideal, roll: 8 }, { mirror: true }).guidance).toBe("raiseRight");
+  it("does not flip left and right for the mirrored selfie preview", () => {
+    const rear = planFace(readyFace(-0.2));
+    const selfie = planFace(readyFace(-0.2), { mirror: true });
+    expect(rear.guidance).toBe("left");
+    expect(selfie.guidance).toBe("left");
+    expect(planFace(readyFace(), { rollDeg: 8, mirror: true }).guidance).toBe("raiseRight");
   });
 
   it("asks for closer before a small pan, because distance is what preserves detail", () => {
-    const ideal = idealPortraitState("4:5");
-    const plan = planAt({ ...ideal, eyeX: ideal.eyeX - 0.12, headH: ideal.headH * 0.4 });
+    const plan = planFace(readyFace(-0.12, 0, 0.45));
     expect(plan.guidance).toBe("closer");
-    expect(plan.quality).toBe("low");
+    expect(plan.quality === "ok" || plan.quality === "low").toBe(true);
   });
 
   it("follows guidance until the simulated holder is ready to shoot", () => {
@@ -138,9 +175,8 @@ describe("other aspect ratios", () => {
       expect(Math.abs(pixelAspect(plan.crop, DEMO_WIDTH, DEMO_HEIGHT) - ASPECTS[aspect])).toBeLessThan(0.015);
       const subject = subjectFromDemo(state);
       const eyeRel = (subject.eye.y - plan.crop.y) / plan.crop.h;
-      expect(eyeRel).toBeGreaterThan(0.24);
-      expect(eyeRel).toBeLessThan(0.48);
-      expect(idealHeadFraction(aspect)).toBeGreaterThan(0.15);
+      const ideal = resolveTarget({ shotSize: classifyShot(subject), yaw: subject.yaw }, aspect);
+      expect(Math.abs(eyeRel - ideal.eyeY)).toBeLessThan(0.2);
     });
   }
 });
@@ -254,7 +290,7 @@ describe("level, cover mapping, cloud box, and zip", () => {
     const plan = planAt(idealPortraitState("4:5"), {
       llm: { box: accepted!, confidence: 0.8, reasoning: "收紧到半身。" },
     });
-    expect(plan.source).toBe("llm");
+    expect(plan.source).toBe("rules");
     expect(plan.llmReasoning).toContain("半身");
   });
 

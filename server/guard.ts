@@ -2,11 +2,16 @@ export type RateBucket = { count: number; reset: number };
 
 const buckets = new Map<string, RateBucket>();
 
-export function originAllowed(origin: string | null, allowlist: string[]): boolean {
+export function originAllowed(origin: string | null, allowlist: string[], allowLocalhost = false): boolean {
   if (!origin) return false;
   const normalized = origin.replace(/\/$/, "");
   if (allowlist.some((item) => item.replace(/\/$/, "") === normalized)) return true;
+  if (!allowLocalhost) return false;
   return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(normalized);
+}
+
+export function allowLocalhost(env: { NODE_ENV?: string; FRAME_ALLOW_LOCALHOST?: string }): boolean {
+  return env.FRAME_ALLOW_LOCALHOST === "1" || env.NODE_ENV !== "production";
 }
 
 export function allowlistFromEnv(raw: string | undefined): string[] {
@@ -18,8 +23,15 @@ export function allowlistFromEnv(raw: string | undefined): string[] {
 }
 
 /** True when the caller is still inside the quota. */
+export function pruneRates(now: number, store = buckets): void {
+  for (const [key, bucket] of store) {
+    if (now >= bucket.reset) store.delete(key);
+  }
+}
+
 export function allowRate(ip: string, now: number, limit = 8, windowMs = 60_000, store = buckets): boolean {
-  const key = ip || "unknown";
+  pruneRates(now, store);
+  const key = ip || "anonymous";
   const current = store.get(key);
   if (!current || now >= current.reset) {
     store.set(key, { count: 1, reset: now + windowMs });
@@ -31,8 +43,8 @@ export function allowRate(ip: string, now: number, limit = 8, windowMs = 60_000,
 }
 
 export function clientIp(request: Request): string {
-  const forwarded = request.headers.get("x-nf-client-connection-ip") || request.headers.get("x-forwarded-for") || "";
-  return forwarded.split(",")[0]?.trim() || "unknown";
+  const netlify = request.headers.get("x-nf-client-connection-ip")?.trim();
+  return netlify || "anonymous";
 }
 
 export function safeSubject(value: unknown): Record<string, number | string | null | { name: string; x: number; y: number }[]> | null {

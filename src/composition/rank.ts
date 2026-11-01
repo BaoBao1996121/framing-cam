@@ -1,4 +1,5 @@
 import { EYE_LINE, IDEAL_HEADROOM, MAX_DIGITAL_ZOOM, idealHeadFraction } from "./constants";
+import { horizontalBand } from "./targets";
 import {
   clamp,
   containsPoint,
@@ -22,9 +23,8 @@ export type CropEvaluation = {
 };
 
 export function placementForYaw(yaw: number): number {
-  if (yaw > 0.18) return 0.37;
-  if (yaw < -0.18) return 0.63;
-  return 0.5;
+  const band = horizontalBand(yaw, "medium");
+  return (band[0] + band[1]) / 2;
 }
 
 export function jointEdgePenalty(crop: Rect, joint: { x: number; y: number }, band: number): number {

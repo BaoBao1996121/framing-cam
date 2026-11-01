@@ -38,6 +38,8 @@ export type SpecStep = {
   score: number;
   aligned: boolean;
   magnitude: number;
+  /** How far to move. The direction hint stays put while this changes. */
+  stage: "little" | "lot" | "none";
   stuck: boolean;
   rect: Rect | null;
   targetBox: Rect | null;
@@ -158,6 +160,8 @@ export class SpecGuide {
   private filter = new MetricFilter(portraitTargets);
   private shot: ShotSize = "medium";
   private subjectId = "";
+  private lastStage: "little" | "lot" | "none" = "none";
+  private reversedAt = -10_000;
 
   constructor(private config: PortraitTargets = portraitTargets) {
     this.filter = new MetricFilter(config);
@@ -186,10 +190,29 @@ export class SpecGuide {
       this.shot = input.shotSize;
       this.subjectId = input.subject?.id ?? "";
     }
+    if (!input.subject && this.memory.shown !== "searching") {
+      const hint = this.memory.shown;
+      const aligned = hint === "ready" || hint === "hold";
+      return {
+        hint,
+        phase: aligned ? "aligned" : "position",
+        error: this.memory.bestError,
+        score: aligned ? 0.9 : 0.5,
+        aligned,
+        magnitude: this.memory.bestError,
+        stage: this.lastStage,
+        stuck: false,
+        rect: null,
+        targetBox: null,
+        complete: true,
+        memory: this.memory,
+      };
+    }
     if (!input.subject || input.frame.width < 2 || input.frame.height < 2) {
       const memory = { ...this.memory, shown: "searching" as const, pending: "searching" as const, pendingSince: input.now };
       this.memory = memory;
-      return { hint: "searching", phase: "search", error: 2, score: 0, aligned: false, magnitude: 2, stuck: false, rect: null, targetBox: null, complete: false, memory };
+      this.lastStage = "none";
+      return { hint: "searching", phase: "search", error: 2, score: 0, aligned: false, magnitude: 2, stage: "none", stuck: false, rect: null, targetBox: null, complete: false, memory };
     }
     const target = resolveTarget(
       { shotSize: input.shotSize, yaw: input.yaw ?? input.subject.yaw, eyeLine: input.eyeLine, headroom: input.headroom, horizontal: input.horizontal },
@@ -205,9 +228,7 @@ export class SpecGuide {
     const hysteresis = this.config.hysteresis;
     const bands = nagBands(input.shotSize, input.frame.aspect, target.eyeYRange, target.headroomRange, target.subjHRange);
     const faceOnly = extent.kind === "face";
-    const k = this.config.landmarks.headTopFromFace.faceTopMinusChinToFaceTopRatio;
-    const faceBand = bands.faceH ? ([bands.faceH[0] * (1 + k), bands.faceH[1] * (1 + k)] as Range) : null;
-    const sizeBand = faceOnly ? faceBand : bands.subjH;
+    const sizeBand = faceOnly ? bands.headH : bands.subjH;
     const sizeValue = faceOnly ? sample.headH : sample.subjH;
     const size = sizeBand
       ? sideOf(sizeValue, sizeBand, this.memory.sizeOk, hysteresis.eyeY.enter, hysteresis.eyeY.exit)
@@ -288,6 +309,8 @@ export class SpecGuide {
       stuck,
     };
     this.memory = memory;
+    const stage: "little" | "lot" | "none" = hint === "ready" || hint === "hold" || hint === "searching" ? "none" : error >= 0.85 ? "lot" : "little";
+    this.lastStage = stage;
     const score = aligned ? Math.max(0.86, 1 - error / 2.2) : Math.max(0, Math.min(1, 1 - error / 2.2));
     const placed = placementFor(target, input.frame, this.config);
     return {
@@ -296,7 +319,8 @@ export class SpecGuide {
       error,
       score,
       aligned,
-      magnitude: Math.max(0, Math.min(3, error)),
+      magnitude: stage === "lot" ? 1.35 : stage === "little" ? 0.45 : Math.max(0, Math.min(3, error)),
+      stage,
       stuck,
       rect: extent.rect,
       targetBox: placed.subjectBox,
@@ -341,6 +365,7 @@ export class SpecGuide {
   private hold(desired: GuideHint, error: number, now: number): GuideHint {
     const shown = this.memory.shown;
     if (desired === shown || shown === "searching" || desired === "searching") return desired;
+    if (shown === "ready" && desired === "hold") return "ready";
     if (desired === "ready" || desired === "hold") {
       const since = this.memory.readySince ?? now;
       this.memory.readySince = since;
@@ -348,13 +373,16 @@ export class SpecGuide {
       return shown;
     }
     const opposite = OPPOSITE[shown];
-    if (desired === opposite && error <= this.memory.bestError + 0.12) return shown;
+    if (desired === opposite && (error <= this.memory.bestError + 0.2 || now - this.reversedAt < 2000)) return shown;
     const pendingSince = desired === this.memory.pending ? this.memory.pendingSince : now;
     this.memory.pending = desired;
     this.memory.pendingSince = pendingSince;
     const dwell = this.config.hysteresis.hintDwellMs;
     const gap = this.config.hysteresis.hintGapMs;
-    if (now - pendingSince >= dwell && now - this.memory.shownSince >= gap) return desired;
+    if (now - pendingSince >= dwell && now - this.memory.shownSince >= gap) {
+      if (desired === opposite) this.reversedAt = now;
+      return desired;
+    }
     return shown;
   }
 }

@@ -8,7 +8,7 @@ import { AutoShutter, SteadyDetector } from "../composition/steady";
 import { cloudAvailable, requestShotPlans } from "../cloud/client";
 import { LiveGuide } from "../guidance/live";
 import { classifyShot } from "../composition/measure";
-import { frameCrop, normalizeShotSize, type FrameSize } from "../composition/intent";
+import { normalizeShotSize, type FrameSize } from "../composition/intent";
 import { pickShutterFrame, type ShutterSnap } from "../camera/shutter-pick";
 import { compositionScore, meanLuminance, smoothScore } from "../guidance/quality";
 import { laplacianVariance } from "../guidance/sharpness";
@@ -112,6 +112,7 @@ class CameraApp {
   private liveGuide = new LiveGuide();
   private lastStuck = false;
   private lastMagnitude = 0;
+  private lastStage: "little" | "lot" | "none" = "none";
   private anchorBox: Rect | null = null;
   private missingSince: number | null = null;
   private countdownMs = 0;
@@ -397,8 +398,10 @@ class CameraApp {
     }
   }
 
-  private phrase(code: GuidanceCode): string {
-    return (this.shoot === "self" ? this.copy.selfie : this.copy.holder)[code];
+  private phrase(code: GuidanceCode, stage: "little" | "lot" | "none" = "none"): string {
+    const base = (this.shoot === "self" ? this.copy.selfie : this.copy.holder)[code];
+    if (stage === "none" || code === "searching" || code === "steady" || code === "ready") return base;
+    return stage === "lot" ? `${base}，多一些` : `${base}，就一点`;
   }
 
   private setPreparing(on: boolean): void {
@@ -906,12 +909,13 @@ class CameraApp {
       measured = step.rect ?? region;
       guideTarget = step.targetBox ?? active.targetBox;
       this.lastStuck = step.stuck;
-      this.lastMagnitude = step.magnitude;
+      this.lastMagnitude = step.stage === "lot" ? 1.35 : step.stage === "little" ? 0.45 : 0.15;
+      this.lastStage = step.stage;
       guideAligned = step.aligned && !stale && step.complete;
       bar = step.score;
       readyNow = step.hint === "ready" && !stale && step.complete && !this.liveGuide.eyesClosed;
       promptCode = step.hint === "hold" ? "steady" : step.hint;
-      promptText = stale ? this.copy.stale : this.phrase(promptCode);
+      promptText = stale ? this.copy.stale : this.phrase(promptCode, step.stage);
       this.rawGuidance = promptCode;
       if (!readyNow) {
         this.alignedSince = 0;
@@ -984,6 +988,7 @@ class CameraApp {
       document.body.dataset.subject = [shownRect.x, shownRect.y, shownRect.w, shownRect.h].map((value) => value.toFixed(3)).join(",");
     }
     document.body.dataset.stuck = this.lastStuck ? "1" : "0";
+    document.body.dataset.magnitude = this.lastStage;
     const summary = this.liveGuide.metrics.summary(time);
     (window as unknown as { __metrics?: unknown }).__metrics = { ...summary, source: "device" };
     this.setPreparing(this.screen === "live" && !this.vision?.ready);
@@ -1052,6 +1057,8 @@ class CameraApp {
     };
     document.body.dataset.captured = "1";
     document.body.dataset.still = `${source.width}x${source.height}`;
+    document.body.dataset.stillFrom = this.mode === "demo" || this.frameCamera ? "painted-frame" : "camera";
+    this.liveGuide.metrics.markCapture(performance.now());
     const flash = must<HTMLElement>("flash");
     flash.classList.remove("go");
     void flash.offsetWidth;
@@ -1084,13 +1091,9 @@ class CameraApp {
       steady: true,
       mirror: false,
       llm: this.shot.llm,
+      shotSize: this.shot.shotPlan?.shotSize,
     });
-    const crop = insetCrop(
-      this.shot.shotPlan
-        ? frameCrop({ width: this.shot.width, height: this.shot.height, aspect: this.aspect })
-        : plan.crop,
-      this.shot.roll,
-    );
+    const crop = insetCrop(plan.crop, this.shot.roll);
     const cropped = renderCrop(this.shot.source, this.shot.width, this.shot.height, crop, this.shot.mirror);
     if (this.reviewUrl) URL.revokeObjectURL(this.reviewUrl);
     canvasToJpeg(cropped)
@@ -1126,11 +1129,9 @@ class CameraApp {
         rollDeg: this.shot.roll,
         steady: true,
         llm: this.shot.llm,
+        shotSize: this.shot.shotPlan?.shotSize,
       });
-      const crop = insetCrop(
-        this.shot.shotPlan ? frameCrop({ width: this.shot.width, height: this.shot.height, aspect }) : plan.crop,
-        this.shot.roll,
-      );
+      const crop = insetCrop(plan.crop, this.shot.roll);
       const cropped = renderCrop(this.shot.source, this.shot.width, this.shot.height, crop, this.shot.mirror);
       const blob = await canvasToJpeg(cropped);
       const name = `framing-cam-${aspect.replace(":", "x")}.jpg`;

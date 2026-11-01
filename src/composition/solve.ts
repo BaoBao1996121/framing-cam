@@ -1,5 +1,5 @@
 import { clamp, largestAspectRect, toNorm } from "./geometry";
-import { ASPECTS, type AspectId, type Rect } from "./types";
+import { ASPECTS, type AspectId, type Rect, type Subject } from "./types";
 import type { ShotSize } from "./intent";
 import {
   asRange,
@@ -79,6 +79,16 @@ export function placementFor(
   const x = clamp(center - width / 2, 0, Math.max(0, 1 - width));
   const y = clamp(top, 0, Math.max(0, 1 - height));
   return { crop, subjectBox: { x, y, w: width, h: height } };
+}
+
+/** Aspect window shifted so this subject's eyes land on the ideal line. Same solver as the ghost. */
+export function cropAroundSubject(subject: Subject | null, shot: ShotSize, frame: FrameSize, config: PortraitTargets = portraitTargets): Rect {
+  const base = frameCrop(frame);
+  if (!subject) return base;
+  const target = resolveTarget({ shotSize: shot, yaw: subject.yaw }, frame.aspect, config);
+  const x = clamp(subject.eye.x - target.horizontal * base.w, 0, Math.max(0, 1 - base.w));
+  const y = clamp(subject.eye.y - target.eyeY * base.h, 0, Math.max(0, 1 - base.h));
+  return { x, y, w: base.w, h: base.h };
 }
 
 export function guidanceBox(

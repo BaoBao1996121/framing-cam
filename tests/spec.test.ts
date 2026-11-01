@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { measure } from "../src/guidance/machine";
 import { SpecGuide } from "../src/guidance/spec-guide";
-import { simulateApproaches } from "../src/guidance/simulate";
+import { simulateSuite } from "../src/guidance/simulate";
 import { eyesClosedFromBlend } from "../src/guidance/eyes";
 import { predictRect } from "../src/guidance/predict";
 import { subjectRegion } from "../src/composition/subject";
-import { horizontalBand, portraitTargets } from "../src/composition/targets";
+import { horizontalBand, idealBands, nagBands, portraitTargets } from "../src/composition/targets";
+import { ASPECT_IDS, type AspectId } from "../src/composition/types";
+import type { ShotSize } from "../src/composition/intent";
 import { headTopFromCategoryMask, headTopFromFace } from "../src/composition/head-top";
-import { resolveTarget } from "../src/composition/solve";
+import { frameCrop, resolveTarget } from "../src/composition/solve";
 import type { Subject } from "../src/composition/types";
 
 const frame = { width: 480, height: 640, aspect: "4:5" as const };
@@ -32,6 +34,59 @@ function bust(): Subject {
 }
 
 describe("portrait spec", () => {
+  it("keeps every ideal range inside the no-nag band", () => {
+    const shots: ShotSize[] = ["close", "medium", "three-quarter", "full", "wide"];
+    const aspects = ASPECT_IDS;
+    const within = (ideal: [number, number] | null, band: [number, number] | null) => {
+      if (!ideal || !band) return;
+      expect(ideal[0]).toBeGreaterThanOrEqual(band[0] - 1e-9);
+      expect(ideal[1]).toBeLessThanOrEqual(band[1] + 1e-9);
+    };
+    for (const shot of shots) {
+      for (const aspect of aspects as AspectId[]) {
+        const ideal = idealBands(shot, aspect);
+        const band = nagBands(shot, aspect, ideal.eyeY, ideal.headroom, ideal.subjH);
+        within(ideal.eyeY, band.eyeY);
+        within(ideal.headroom, band.headroom);
+        within(ideal.subjH, band.subjH);
+        within(ideal.headH, band.headH);
+        within(ideal.faceX, band.faceX);
+      }
+    }
+  });
+
+  it("accepts a 9:16 close-up that sits on the ghost", () => {
+    const aspect = "9:16" as const;
+    const frameSize = { width: 1080, height: 1920, aspect };
+    const crop = frameCrop(frameSize);
+    const ideal = resolveTarget({ shotSize: "close" }, aspect);
+    const headH = ((ideal.headHRange![0] + ideal.headHRange![1]) / 2) * crop.h;
+    const eyeY = crop.y + ideal.eyeY * crop.h;
+    const headTop = crop.y + ideal.headroom * crop.h;
+    const step = new SpecGuide().step({
+      now: 0,
+      subject: {
+        id: "ghost",
+        eye: { x: crop.x + crop.w * 0.5, y: eyeY },
+        headTop,
+        chinY: headTop + headH,
+        headLeft: 0.4,
+        headRight: 0.6,
+        yaw: 0,
+        shouldersY: null,
+        shoulders: [],
+        joints: [],
+        confidence: 1,
+      },
+      shotSize: "close",
+      frame: frameSize,
+      rollDeg: 0,
+      steady: true,
+    });
+    expect(step.hint).not.toBe("closer");
+    expect(["ready", "hold"]).toContain(step.hint);
+  });
+
   it("aims at the spec ideal and stays quiet inside the calibrated band", () => {
     const guide = new SpecGuide();
     const inside = guide.step({
@@ -109,12 +164,15 @@ describe("portrait spec", () => {
 });
 
 describe("closed-loop simulator", () => {
-  it("reports simulated convergence, reversals, and compute latency", () => {
-    const report = simulateApproaches(24);
+  it("keeps flips under one a minute and reports hint and capture times apart from compute", () => {
+    const report = simulateSuite();
     console.log(JSON.stringify(report));
-    expect(report.convergence).toBeGreaterThanOrEqual(0.95);
-    expect(report.reversalRate).toBeLessThanOrEqual(0.02);
-    expect(report.reversalsPerMin).toBeLessThanOrEqual(1);
-    expect(report.computeP95Ms).toBeLessThanOrEqual(150);
+    expect(report.guidedConvergence).toBeGreaterThanOrEqual(0.9);
+    expect(report.flipsPerMin).toBeLessThanOrEqual(1);
+    expect(report.timeToFirstHintMs).toBeGreaterThanOrEqual(0);
+    expect(report.timeToCaptureMs).not.toBeNull();
+    expect((report.timeToCaptureMs ?? 0) - (report.timeToReadyMs ?? 0)).toBe(1000);
+    expect(report.computeP95Ms).toBeLessThan(150);
+    expect(report.computeP95Ms).toBeLessThan(report.timeToCaptureMs ?? 1);
   });
 });

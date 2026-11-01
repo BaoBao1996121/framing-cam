@@ -10,8 +10,41 @@ export function originAllowed(origin: string | null, allowlist: string[], allowL
   return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(normalized);
 }
 
-export function allowLocalhost(env: { NODE_ENV?: string; FRAME_ALLOW_LOCALHOST?: string }): boolean {
-  return env.FRAME_ALLOW_LOCALHOST === "1" || env.NODE_ENV !== "production";
+export function allowLocalhost(env: { FRAME_ALLOW_LOCALHOST?: string }): boolean {
+  return env.FRAME_ALLOW_LOCALHOST === "1";
+}
+
+const BODY_CAP = 1_800_000;
+
+/** Read the body, stopping once it passes the cap. A missing content-length still cannot grow without bound. */
+export async function readLimitedBody(request: Request, max = BODY_CAP): Promise<string | null> {
+  const declared = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > max) return null;
+  const reader = request.body?.getReader();
+  if (!reader) {
+    const text = await request.text();
+    return text.length > max ? null : text;
+  }
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value?.byteLength) continue;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel().catch(() => undefined);
+      return null;
+    }
+    chunks.push(value);
+  }
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(merged);
 }
 
 export function allowlistFromEnv(raw: string | undefined): string[] {
@@ -42,7 +75,15 @@ export function allowRate(ip: string, now: number, limit = 8, windowMs = 60_000,
   return true;
 }
 
+function firstAddress(value: string | null): string {
+  return value?.split(",")[0]?.trim() || "";
+}
+
 export function clientIp(request: Request): string {
+  const real = firstAddress(request.headers.get("x-real-ip"));
+  if (real) return real;
+  const vercel = firstAddress(request.headers.get("x-vercel-forwarded-for"));
+  if (vercel) return vercel;
   const netlify = request.headers.get("x-nf-client-connection-ip")?.trim();
   return netlify || "anonymous";
 }

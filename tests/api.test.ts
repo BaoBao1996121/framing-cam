@@ -13,11 +13,13 @@ describe("framing API", () => {
         origin: "https://framing-cam.netlify.app",
         "content-type": "application/json",
         "x-nf-client-connection-ip": "198.51.100.8",
+        "x-real-ip": "203.0.113.50",
       },
       body: "{}",
     });
     expect(request.headers.get("origin")).toBe("https://framing-cam.netlify.app");
-    expect(request.headers.get("x-nf-client-connection-ip")).toBe("198.51.100.8");
+    expect(request.headers.get("x-nf-client-connection-ip")).toBeNull();
+    expect(request.headers.get("x-real-ip")).toBe("203.0.113.50");
   });
 
   it("reports that no key means rules-only", async () => {
@@ -25,17 +27,43 @@ describe("framing API", () => {
     expect(await response.json()).toEqual({ ok: true, llm: false });
   });
 
-  it("refuses localhost in production and ignores a spoofed forwarded-for", async () => {
+  it("refuses localhost unless the flag is set, and keys the limit on x-real-ip", async () => {
     const blocked = await handleApi(
       new Request("http://local/api/frame", {
         method: "POST",
         headers: { origin: "http://127.0.0.1:5199" },
         body: "{}",
       }),
-      { NODE_ENV: "production", LLM_API_KEY: "test-key" },
+      { NODE_ENV: "development", LLM_API_KEY: "test-key" },
     );
     expect(blocked.status).toBe(403);
+    const opened = await handleApi(
+      new Request("http://local/api/frame", {
+        method: "POST",
+        headers: { origin: "http://127.0.0.1:9", "x-real-ip": "198.51.100.9" },
+        body: "{",
+      }),
+      { FRAME_ALLOW_LOCALHOST: "1", LLM_API_KEY: "test-key" },
+    );
+    expect(opened.status).not.toBe(403);
     let allowed = 0;
+    for (let index = 0; index < 12; index += 1) {
+      const response = await handleApi(
+        new Request("http://local/api/frame", {
+          method: "POST",
+          headers: {
+            origin: "https://framing-cam.netlify.app",
+            "x-nf-client-connection-ip": `203.0.113.${index}`,
+            "x-real-ip": "198.51.100.20",
+          },
+          body: "{",
+        }),
+        { LLM_API_KEY: "test-key" },
+      );
+      if (response.status !== 429) allowed += 1;
+    }
+    expect(allowed).toBeLessThanOrEqual(8);
+    let spoofed = 0;
     for (let index = 0; index < 12; index += 1) {
       const response = await handleApi(
         new Request("http://local/api/frame", {
@@ -45,13 +73,13 @@ describe("framing API", () => {
         }),
         { NODE_ENV: "production", LLM_API_KEY: "test-key" },
       );
-      if (response.status !== 429) allowed += 1;
+      if (response.status !== 429) spoofed += 1;
     }
-    expect(allowed).toBeLessThanOrEqual(8);
+    expect(spoofed).toBeLessThanOrEqual(8);
   });
 
   it("rejects a foreign origin and limits repeated frame calls", async () => {
-    const env = { LLM_API_KEY: "test-key" };
+    const env = { LLM_API_KEY: "test-key", FRAME_ALLOW_LOCALHOST: "1" };
     const denied = await handleApi(
       new Request("http://local/api/frame", {
         method: "POST",
@@ -79,9 +107,36 @@ describe("framing API", () => {
         headers: { origin: "http://127.0.0.1:5199" },
         body: JSON.stringify({ imageDataUrl: "data:image/jpeg;base64,aaaa", aspect: "4:5", imageWidth: 10, imageHeight: 10 }),
       }),
-      {},
+      { FRAME_ALLOW_LOCALHOST: "1" },
     );
     expect(await response.json()).toMatchObject({ ok: false, error: "unconfigured" });
+  });
+
+  it("stops reading a chunked body once it passes the cap", async () => {
+    let sent = 0;
+    const total = 2_000_000;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent >= total) {
+          controller.close();
+          return;
+        }
+        const size = Math.min(64 * 1024, total - sent);
+        controller.enqueue(new Uint8Array(size));
+        sent += size;
+      },
+    });
+    const response = await handleApi(
+      new Request("http://local/api/frame", {
+        method: "POST",
+        headers: { origin: "https://framing-cam.netlify.app", "x-real-ip": "198.51.100.77" },
+        body,
+        duplex: "half",
+      } as RequestInit),
+      { LLM_API_KEY: "test-key" },
+    );
+    expect(response.status).toBe(413);
+    expect(sent).toBeLessThan(total);
   });
 
   it("presets DashScope Qwen-VL and Volcengine Doubao, and lets env override them", () => {

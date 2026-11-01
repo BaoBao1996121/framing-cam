@@ -124,6 +124,19 @@ describe("portrait spec", () => {
     expect(resolveTarget({ shotSize: "close" }, "4:5").eyeY).toBeCloseTo(0.355);
   });
 
+  it("searches again after the subject has been gone for a short gap", () => {
+    const guide = new SpecGuide();
+    const seen = guide.step({ now: 0, subject: bust(), shotSize: "close", frame, rollDeg: 0, steady: true });
+    expect(seen.hint).not.toBe("searching");
+    const brief = guide.step({ now: 200, subject: null, shotSize: "close", frame, rollDeg: 0, steady: true });
+    expect(brief.hint).toBe(seen.hint);
+    expect(brief.complete).toBe(false);
+    expect(brief.aligned).toBe(false);
+    const gone = guide.step({ now: 700, subject: null, shotSize: "close", frame, rollDeg: 0, steady: true });
+    expect(gone.hint).toBe("searching");
+    expect(gone.complete).toBe(false);
+  });
+
   it("does not tell a full-body plan to step closer when the feet are missing", () => {
     const subject = bust();
     const oldTarget = { x: 0.28, y: 0.06, w: 0.44, h: 0.82 };

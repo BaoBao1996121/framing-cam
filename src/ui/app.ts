@@ -913,7 +913,7 @@ class CameraApp {
       this.lastStage = step.stage;
       guideAligned = step.aligned && !stale && step.complete;
       bar = step.score;
-      readyNow = step.hint === "ready" && !stale && step.complete && !this.liveGuide.eyesClosed;
+      readyNow = Boolean(subject) && step.hint === "ready" && !stale && step.complete && !this.liveGuide.eyesClosed;
       promptCode = step.hint === "hold" ? "steady" : step.hint;
       promptText = stale ? this.copy.stale : this.phrase(promptCode, step.stage);
       this.rawGuidance = promptCode;

@@ -2,7 +2,7 @@ import type { AspectId } from "../src/composition/types";
 import { buildPlansPrompt, PLANS_SYSTEM } from "../src/plans/prompt";
 import { repairPlansFromText } from "../src/plans/validate";
 import type { Rect } from "../src/composition/types";
-import { allowlistFromEnv, allowLocalhost, allowRate, clampText, clientIp, originAllowed, safeSubject } from "./guard";
+import { allowlistFromEnv, allowLocalhost, allowRate, clampText, clientIp, originAllowed, readLimitedBody, safeSubject } from "./guard";
 
 export type LlmEnv = {
   LLM_API_KEY?: string;
@@ -228,11 +228,8 @@ export async function handleApi(request: Request, env: LlmEnv): Promise<Response
   }
   if (!llmConfigured(env)) return json({ ok: false, error: "unconfigured" });
   if (!allowRate(clientIp(request), Date.now())) return json({ ok: false, error: "rate" }, 429);
-  const declared = Number(request.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > 1_800_000) return json({ ok: false, error: "too_large" }, 413);
-
-  const raw = await request.text();
-  if (raw.length > 1_800_000) return json({ ok: false, error: "too_large" }, 413);
+  const raw = await readLimitedBody(request);
+  if (raw == null) return json({ ok: false, error: "too_large" }, 413);
   let body: FrameBody;
   try {
     body = JSON.parse(raw) as FrameBody;

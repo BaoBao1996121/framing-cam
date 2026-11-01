@@ -19,7 +19,7 @@ export async function toRequest(request: any): Promise<Request> {
   const url = request.url?.startsWith("http") ? request.url : `https://${host}${request.url || "/"}`;
   const headers = new Headers();
   headers.set("content-type", header(request, "content-type") || "application/json");
-  for (const name of ["origin", "x-nf-client-connection-ip", "content-length"]) {
+  for (const name of ["origin", "x-real-ip", "x-vercel-forwarded-for", "content-length"]) {
     const value = header(request, name);
     if (value) headers.set(name, value);
   }
@@ -27,11 +27,21 @@ export async function toRequest(request: any): Promise<Request> {
 }
 
 async function readBody(request: any): Promise<string> {
-  if (typeof request.body === "string") return request.body;
-  if (Buffer.isBuffer(request.body)) return request.body.toString("utf8");
-  if (request.body && typeof request.body === "object") return JSON.stringify(request.body);
+  const max = 1_800_001;
+  if (typeof request.body === "string") return request.body.length > max ? request.body.slice(0, max) : request.body;
+  if (Buffer.isBuffer(request.body)) {
+    const text = request.body.toString("utf8");
+    return text.length > max ? text.slice(0, max) : text;
+  }
+  if (request.body && typeof request.body === "object" && !request[Symbol.asyncIterator]) return JSON.stringify(request.body);
   const chunks: Buffer[] = [];
-  for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  let total = 0;
+  for await (const chunk of request) {
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += buf.length;
+    chunks.push(buf);
+    if (total > max) break;
+  }
   return Buffer.concat(chunks).toString("utf8");
 }
 

@@ -162,6 +162,7 @@ export class SpecGuide {
   private subjectId = "";
   private lastStage: "little" | "lot" | "none" = "none";
   private reversedAt = -10_000;
+  private missingSince: number | null = null;
 
   constructor(private config: PortraitTargets = portraitTargets) {
     this.filter = new MetricFilter(config);
@@ -171,6 +172,7 @@ export class SpecGuide {
     this.memory = initialSpec(now);
     this.filter = new MetricFilter(this.config);
     this.subjectId = "";
+    this.missingSince = null;
   }
 
   step(input: {
@@ -190,25 +192,32 @@ export class SpecGuide {
       this.shot = input.shotSize;
       this.subjectId = input.subject?.id ?? "";
     }
-    if (!input.subject && this.memory.shown !== "searching") {
-      const hint = this.memory.shown;
-      const aligned = hint === "ready" || hint === "hold";
-      return {
-        hint,
-        phase: aligned ? "aligned" : "position",
-        error: this.memory.bestError,
-        score: aligned ? 0.9 : 0.5,
-        aligned,
-        magnitude: this.memory.bestError,
-        stage: this.lastStage,
-        stuck: false,
-        rect: null,
-        targetBox: null,
-        complete: true,
-        memory: this.memory,
-      };
+    if (!input.subject) {
+      if (this.missingSince == null) this.missingSince = input.now;
+      const gap = input.now - this.missingSince;
+      if (this.memory.shown !== "searching" && gap < 400) {
+        return {
+          hint: this.memory.shown,
+          phase: "search",
+          error: this.memory.bestError,
+          score: 0.4,
+          aligned: false,
+          magnitude: this.memory.bestError,
+          stage: this.lastStage,
+          stuck: false,
+          rect: null,
+          targetBox: null,
+          complete: false,
+          memory: this.memory,
+        };
+      }
+      const memory = { ...this.memory, shown: "searching" as const, pending: "searching" as const, pendingSince: input.now };
+      this.memory = memory;
+      this.lastStage = "none";
+      return { hint: "searching", phase: "search", error: 2, score: 0, aligned: false, magnitude: 2, stage: "none", stuck: false, rect: null, targetBox: null, complete: false, memory };
     }
-    if (!input.subject || input.frame.width < 2 || input.frame.height < 2) {
+    this.missingSince = null;
+    if (input.frame.width < 2 || input.frame.height < 2) {
       const memory = { ...this.memory, shown: "searching" as const, pending: "searching" as const, pendingSince: input.now };
       this.memory = memory;
       this.lastStage = "none";

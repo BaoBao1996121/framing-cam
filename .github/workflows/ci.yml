@@ -14,5 +14,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npx playwright install --with-deps webkit chromium
       - run: npm test
+      - run: npm run e2e
       - run: npm run build

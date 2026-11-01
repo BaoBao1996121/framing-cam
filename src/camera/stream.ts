@@ -1,4 +1,5 @@
 import { inferenceSize } from "./pixels";
+import { previewConstraints } from "./still";
 
 export type Facing = "environment" | "user";
 
@@ -13,15 +14,7 @@ export async function attachCamera(video: HTMLVideoElement, facing: Facing): Pro
     await waitForVideoSize(video, 4000);
     return new MediaStream();
   }
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: false,
-    video: {
-      facingMode: { ideal: facing },
-      width: { ideal: 1280 },
-      height: { ideal: 720 },
-      frameRate: { ideal: 30, max: 30 },
-    },
-  });
+  const stream = await navigator.mediaDevices.getUserMedia(previewConstraints(facing));
   video.srcObject = stream;
   video.playsInline = true;
   video.muted = true;

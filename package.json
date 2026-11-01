@@ -14,12 +14,14 @@
     "preview": "vite preview --host",
     "preview:https": "HTTPS=1 vite preview --host",
     "test": "vitest run",
+    "e2e": "playwright test",
     "fetch-models": "node scripts/fetch-models.mjs"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^0.10.35"
   },
   "devDependencies": {
+    "@playwright/test": "^1.56.1",
     "@types/node": "^26.6.6",
     "@types/pngjs": "^6.0.5",
     "@vitejs/plugin-basic-ssl": "^2.3.0",

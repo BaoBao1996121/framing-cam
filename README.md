@@ -110,7 +110,7 @@ Unit tests cover the coach (which way to move, including the mirrored selfie pre
 
 ## Limitations
 
-- iOS and mobile Chrome only expose the camera on HTTPS (or localhost). Stream resolution is whatever `getUserMedia` allows — often 1080p or 4K, not the full still-photo sensor. A still capture from `ImageCapture.takePhoto()` can disagree with the video field of view, so the crop is taken from the same frame the coach saw.
+- iOS and mobile Chrome only expose the camera on HTTPS (or localhost). The live coach reads a small preview (about 960×540) so guidance stays smooth. The saved photo uses `ImageCapture.takePhoto()` when the browser has it, otherwise the largest video size the track allows, and keeps the sharpest of a short burst. A tilt under about six degrees is leveled; the crop is then the chosen aspect. A still can see a slightly different field of view than the preview.
 - Hardware zoom constraints are uneven (mainly iOS 17+) and enlarge by throwing pixels away. This app does not use them. It crops digitally inside a limit, and asks the holder to step closer past that.
 - The level guide needs motion permission. iOS has no vibration API. Voice uses the system speech voices that are installed.
 - Pose and face try the GPU on desktop and fall back to CPU if a frame fails. iPhone and iPad start on CPU. Wasm and the `.task` models are served from this site (`/vendor`), not from a CDN. Camera frames are copied as pixels. Detection runs in a worker, and if that worker cannot start (iOS Safari has no `document` inside a worker), the same pose and face models run on the main thread. The failure reason stays on screen only when both fail. A close-up that shows only a face still counts as a person.
@@ -236,7 +236,7 @@ npm run build
 
 ## 已知限制
 
-- iOS 和手机 Chrome 只在 HTTPS（或 localhost）上提供相机。`getUserMedia` 的分辨率通常是 1080p 或 4K 这一档，不是传感器的完整静物分辨率。`ImageCapture.takePhoto()` 的视野可能和预览不一致，所以裁切使用的是引导所看到的那一帧。
+- iOS 和手机 Chrome 只在 HTTPS（或 localhost）上提供相机。实时引导读的是大约 960×540 的预览，好让画面保持流畅。成片优先用 `ImageCapture.takePhoto()`，否则用轨道允许的最大视频尺寸，并在连拍里留下更清晰的一张。大约六度以内的倾斜会扶正，然后再按画幅裁切。静物的视野可能和预览略有差别。
 - 硬件变焦约束并不普遍（主要是 iOS 17 及以后），而且变焦会丢掉像素。本应用不用它。数字裁切有上限，超过就请拿手机的人走近。
 - 水平校正需要动作传感器权限。iOS 没有振动接口。语音依赖系统里已安装的语音包。
 - 桌面端姿势和人脸先试 GPU，某一帧失败就改用 CPU。iPhone 和 iPad 从 CPU 开始。wasm 和 `.task` 模型由本站的 `/vendor` 提供，不走外部 CDN。相机帧按像素拷进识别。识别先在 Worker 里跑；如果 Worker 起不来（iOS Safari 的 Worker 里没有 `document`），同一套姿势和人脸模型改在主线程跑。只有两边都失败时，原因才留在画面上。只有脸的特写也算一个人。

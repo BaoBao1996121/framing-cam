@@ -1,5 +1,6 @@
 import { assertSameOrigin } from "../camera/pixels";
 import { attachCamera, grabInferencePixels, stopStream, type Facing } from "../camera/stream";
+import { applyLevel, insetCrop, shouldLevel, stillFromVideo } from "../camera/still";
 import { ASPECTS, ASPECT_IDS, type AspectId, type FramePlan, type GuidanceCode, type LlmSuggestion, type Rect, type Subject } from "../composition/types";
 import { frameAroundTarget } from "../composition/geometry";
 import { planFrame, stabilizeGuidance, type GuidanceMemory } from "../composition/plan";
@@ -8,7 +9,7 @@ import { AutoShutter, SteadyDetector } from "../composition/steady";
 import { cloudAvailable, requestShotPlans } from "../cloud/client";
 import { initialGuide, stepGuide, type GuideMemory as ShotGuideMemory } from "../guidance/machine";
 import { compositionScore, meanLuminance, smoothScore } from "../guidance/quality";
-import { laplacianVariance, pickSharpest } from "../guidance/sharpness";
+import { laplacianVariance } from "../guidance/sharpness";
 import { planIsStale } from "../guidance/stale";
 import { fallbackPlans } from "../plans/fallback";
 import type { ShotPlan } from "../plans/types";
@@ -977,24 +978,37 @@ class CameraApp {
 
   private capture(): void {
     if (this.capturing || this.screen !== "live") return;
-    const source = this.currentSource();
-    if (!source) return;
+    const preview = this.currentSource();
+    if (!preview) return;
     this.capturing = true;
-    document.body.dataset.captured = "1";
-    const best = pickSharpest(this.snaps.filter((snap) => performance.now() - snap.at < 1200));
-    const chosen = best ?? { canvas: source.canvas };
+    void this.finishCapture(preview);
+  }
+
+  private async finishCapture(preview: { canvas: HTMLCanvasElement; width: number; height: number }): Promise<void> {
+    const roll = this.mode === "demo" ? this.demo.roll : this.motion.roll();
+    let source = preview.canvas;
+    try {
+      if (this.mode === "camera" && !this.frameCamera) {
+        source = await stillFromVideo(this.video, this.stream?.getVideoTracks()[0] ?? null);
+      }
+      if (shouldLevel(roll) && roll != null) source = applyLevel(source, source.width, source.height, roll);
+    } catch {
+      source = preview.canvas;
+    }
     const subject = selectSubject(this.subjects, this.selectedId);
     this.shot = {
-      source: chosen.canvas,
-      width: chosen.canvas.width,
-      height: chosen.canvas.height,
+      source,
+      width: source.width,
+      height: source.height,
       subject,
-      roll: this.mode === "demo" ? this.demo.roll : this.motion.roll(),
+      roll,
       llm: this.llm,
       shotPlan: this.plans[this.planIndex] ?? null,
       mirror: this.mirror,
       aspect: this.aspect,
     };
+    document.body.dataset.captured = "1";
+    document.body.dataset.still = `${source.width}x${source.height}`;
     const flash = must<HTMLElement>("flash");
     flash.classList.remove("go");
     void flash.offsetWidth;
@@ -1028,9 +1042,12 @@ class CameraApp {
       mirror: false,
       llm: this.shot.llm,
     });
-    const crop = this.shot.shotPlan
-      ? frameAroundTarget(this.shot.shotPlan.targetBox, ASPECTS[this.aspect], this.shot.width, this.shot.height)
-      : plan.crop;
+    const crop = insetCrop(
+      this.shot.shotPlan
+        ? frameAroundTarget(this.shot.shotPlan.targetBox, ASPECTS[this.aspect], this.shot.width, this.shot.height)
+        : plan.crop,
+      this.shot.roll,
+    );
     const cropped = renderCrop(this.shot.source, this.shot.width, this.shot.height, crop, this.shot.mirror);
     if (this.reviewUrl) URL.revokeObjectURL(this.reviewUrl);
     canvasToJpeg(cropped)
@@ -1038,6 +1055,9 @@ class CameraApp {
         this.reviewUrl = URL.createObjectURL(blob);
         const image = must<HTMLImageElement>("review-img");
         image.src = this.reviewUrl;
+        image.onload = () => {
+          document.body.dataset.output = `${image.naturalWidth}x${image.naturalHeight}`;
+        };
         const note = this.shot?.shotPlan ? [this.shot.shotPlan.title] : [this.copy.framing[plan.framing]];
         if (!this.shot?.subject) note.unshift(this.copy.noSubjectSave);
         else if (!this.shot.shotPlan && plan.quality === "low") note.push(this.copy.qualityLow);
@@ -1064,9 +1084,12 @@ class CameraApp {
         steady: true,
         llm: this.shot.llm,
       });
-      const crop = this.shot.shotPlan
-        ? frameAroundTarget(this.shot.shotPlan.targetBox, ASPECTS[aspect], this.shot.width, this.shot.height)
-        : plan.crop;
+      const crop = insetCrop(
+        this.shot.shotPlan
+          ? frameAroundTarget(this.shot.shotPlan.targetBox, ASPECTS[aspect], this.shot.width, this.shot.height)
+          : plan.crop,
+        this.shot.roll,
+      );
       const cropped = renderCrop(this.shot.source, this.shot.width, this.shot.height, crop, this.shot.mirror);
       const blob = await canvasToJpeg(cropped);
       const name = `framing-cam-${aspect.replace(":", "x")}.jpg`;

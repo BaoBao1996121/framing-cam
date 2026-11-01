@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { shouldProbeCloud } from "../src/cloud/client";
 import { buildFramingPrompt } from "../src/composition/llm";
-import { handleApi } from "../server/handle";
+import { handleApi, resolveLlmTarget } from "../server/handle";
 
 describe("framing API", () => {
   it("reports that no key means rules-only", async () => {
@@ -17,6 +18,41 @@ describe("framing API", () => {
       {},
     );
     expect(await response.json()).toMatchObject({ ok: false, error: "unconfigured" });
+  });
+
+  it("presets DashScope Qwen-VL and Volcengine Doubao, and lets env override them", () => {
+    expect(resolveLlmTarget({ LLM_PROVIDER: "dashscope" })).toMatchObject({
+      provider: "dashscope",
+      wire: "openai",
+      baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      model: "qwen-vl-max",
+    });
+    expect(resolveLlmTarget({ LLM_PROVIDER: "qwen-vl" }).model).toBe("qwen-vl-max");
+    expect(resolveLlmTarget({ LLM_PROVIDER: "doubao" })).toMatchObject({
+      provider: "doubao",
+      wire: "openai",
+      baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+      model: "doubao-seed-2-1-pro-260628",
+      disableThinking: true,
+    });
+    expect(resolveLlmTarget({ LLM_PROVIDER: "volcengine", LLM_MODEL: "ep-demo" })).toMatchObject({
+      provider: "doubao",
+      model: "ep-demo",
+      baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+    });
+    expect(
+      resolveLlmTarget({
+        LLM_PROVIDER: "dashscope",
+        LLM_BASE_URL: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/",
+        LLM_MODEL: "qwen-vl-plus",
+      }).baseUrl,
+    ).toBe("https://dashscope-intl.aliyuncs.com/compatible-mode/v1");
+  });
+
+  it("probes the cloud endpoint on Netlify and in dev, not on the Pages build", () => {
+    expect(shouldProbeCloud(false, undefined)).toBe(false);
+    expect(shouldProbeCloud(false, "1")).toBe(true);
+    expect(shouldProbeCloud(true, undefined)).toBe(true);
   });
 
   it("mentions the aspect and the subject in the model prompt", () => {

@@ -16,5 +16,5 @@
     "esModuleInterop": true,
     "types": ["vite/client", "node"]
   },
-  "include": ["src", "server", "api", "tests", "vite.config.ts"]
+  "include": ["src", "server", "api", "netlify", "tests", "vite.config.ts"]
 }

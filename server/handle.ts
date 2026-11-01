@@ -29,16 +29,61 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-function providerOf(env: LlmEnv): "openai" | "openai-compatible" | "anthropic" {
-  const name = env.LLM_PROVIDER?.trim();
-  if (name === "anthropic" || name === "openai" || name === "openai-compatible") return name;
-  return env.LLM_BASE_URL?.trim() ? "openai-compatible" : "openai";
-}
+export type LlmTarget = {
+  /** Value of LLM_PROVIDER after aliases, or the inferred default. */
+  provider: string;
+  wire: "openai" | "anthropic";
+  baseUrl: string;
+  model: string;
+  /** Volcengine seed models reason by default; turn that off for a short JSON crop. */
+  disableThinking: boolean;
+};
 
-function modelOf(env: LlmEnv, provider: string): string {
-  if (env.LLM_MODEL?.trim()) return env.LLM_MODEL.trim();
-  if (provider === "anthropic") return "claude-3-5-haiku-latest";
-  return "gpt-4o-mini";
+const DASHSCOPE_BASE = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+const DOUBAO_BASE = "https://ark.cn-beijing.volces.com/api/v3";
+
+export function resolveLlmTarget(env: LlmEnv): LlmTarget {
+  const raw = env.LLM_PROVIDER?.trim().toLowerCase() || "";
+  const alias =
+    raw === "qwen" || raw === "qwen-vl" ? "dashscope" : raw === "volcengine" || raw === "ark" ? "doubao" : raw;
+  const overrideBase = env.LLM_BASE_URL?.trim().replace(/\/$/, "") || "";
+  const overrideModel = env.LLM_MODEL?.trim() || "";
+
+  if (alias === "anthropic") {
+    return {
+      provider: "anthropic",
+      wire: "anthropic",
+      baseUrl: overrideBase || "https://api.anthropic.com/v1",
+      model: overrideModel || "claude-3-5-haiku-latest",
+      disableThinking: false,
+    };
+  }
+  if (alias === "dashscope") {
+    return {
+      provider: "dashscope",
+      wire: "openai",
+      baseUrl: overrideBase || DASHSCOPE_BASE,
+      model: overrideModel || "qwen-vl-max",
+      disableThinking: false,
+    };
+  }
+  if (alias === "doubao") {
+    return {
+      provider: "doubao",
+      wire: "openai",
+      baseUrl: overrideBase || DOUBAO_BASE,
+      model: overrideModel || "doubao-seed-2-1-pro-260628",
+      disableThinking: true,
+    };
+  }
+  const provider = alias === "openai" || alias === "openai-compatible" ? alias : overrideBase ? "openai-compatible" : "openai";
+  return {
+    provider,
+    wire: "openai",
+    baseUrl: overrideBase || "https://api.openai.com/v1",
+    model: overrideModel || "gpt-4o-mini",
+    disableThinking: false,
+  };
 }
 
 type FrameBody = {
@@ -63,7 +108,7 @@ function isAspect(value: string): value is AspectId {
   return value === "4:5" || value === "3:4" || value === "9:16";
 }
 
-async function fetchWithTimeout(url: string, init: RequestInit, ms = 12000): Promise<Response> {
+async function fetchWithTimeout(url: string, init: RequestInit, ms = 9000): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
   try {
@@ -88,14 +133,13 @@ function textFromPayload(payload: unknown): string {
 }
 
 async function callModel(env: LlmEnv, userText: string, dataUrl: string): Promise<LlmFraming> {
-  const provider = providerOf(env);
-  const model = modelOf(env, provider);
+  const target = resolveLlmTarget(env);
   const key = env.LLM_API_KEY?.trim() ?? "";
   let response: Response;
-  if (provider === "anthropic") {
+  if (target.wire === "anthropic") {
     const media = dataUrl.startsWith("data:image/png") ? "image/png" : "image/jpeg";
     const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
-    response = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
+    response = await fetchWithTimeout(`${target.baseUrl.replace(/\/$/, "")}/messages`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -103,7 +147,7 @@ async function callModel(env: LlmEnv, userText: string, dataUrl: string): Promis
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model,
+        model: target.model,
         max_tokens: 500,
         messages: [
           {
@@ -117,36 +161,38 @@ async function callModel(env: LlmEnv, userText: string, dataUrl: string): Promis
       }),
     });
   } else {
-    const base = (env.LLM_BASE_URL?.trim() || "https://api.openai.com/v1").replace(/\/$/, "");
-    const modern = /gpt-[5-9]/.test(model);
+    const modern = /gpt-[5-9]/.test(target.model);
+    const jsonMode = target.provider === "openai" || target.provider === "openai-compatible";
     const messages = [
       { role: "system", content: SYSTEM },
       {
         role: "user",
         content: [
           { type: "text", text: userText },
-          { type: "image_url", image_url: { url: dataUrl, detail: "low" } },
+          { type: "image_url", image_url: jsonMode ? { url: dataUrl, detail: "low" } : { url: dataUrl } },
         ],
       },
     ];
-    const body: Record<string, unknown> = { model, messages, temperature: 0.2 };
+    const body: Record<string, unknown> = { model: target.model, messages, temperature: 0.2 };
+    if (target.disableThinking) body.thinking = { type: "disabled" };
     if (modern) {
       body.max_completion_tokens = 500;
       body.reasoning_effort = "none";
     } else {
       body.max_tokens = 500;
-      body.response_format = { type: "json_object" };
+      if (jsonMode) body.response_format = { type: "json_object" };
     }
-    response = await fetchWithTimeout(`${base}/chat/completions`, {
+    const headers = { "content-type": "application/json", authorization: `Bearer ${key}` };
+    response = await fetchWithTimeout(`${target.baseUrl}/chat/completions`, {
       method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
+      headers,
       body: JSON.stringify(body),
     });
-    if (!response.ok && !modern) {
+    if (!response.ok && body.response_format) {
       delete body.response_format;
-      response = await fetchWithTimeout(`${base}/chat/completions`, {
+      response = await fetchWithTimeout(`${target.baseUrl}/chat/completions`, {
         method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
+        headers,
         body: JSON.stringify(body),
       });
     }
@@ -158,12 +204,22 @@ async function callModel(env: LlmEnv, userText: string, dataUrl: string): Promis
   return framing;
 }
 
+function pathnameOf(request: Request): string {
+  try {
+    return new URL(request.url).pathname;
+  } catch {
+    const raw = request.url || "/";
+    const path = raw.split("?")[0] || "/";
+    return path.startsWith("/") ? path : `/${path}`;
+  }
+}
+
 export async function handleApi(request: Request, env: LlmEnv): Promise<Response> {
-  const url = new URL(request.url);
-  if (url.pathname === "/api/health" && request.method === "GET") {
+  const pathname = pathnameOf(request);
+  if ((pathname === "/api/health" || pathname.endsWith("/api/health")) && request.method === "GET") {
     return json({ ok: true, llm: llmConfigured(env) });
   }
-  if (url.pathname !== "/api/frame") return json({ ok: false, error: "not_found" }, 404);
+  if (pathname !== "/api/frame" && !pathname.endsWith("/api/frame")) return json({ ok: false, error: "not_found" }, 404);
   if (request.method !== "POST") return json({ ok: false, error: "method" }, 405);
   if (!llmConfigured(env)) return json({ ok: false, error: "unconfigured" });
 

@@ -53,12 +53,21 @@ const certificate =
     ? { key: readFileSync(process.env.HTTPS_KEY), cert: readFileSync(process.env.HTTPS_CERT) }
     : undefined;
 
+function normalizeBase(value: string | undefined): string {
+  const raw = (value || "/").trim();
+  if (raw === "./" || raw === ".") return "./";
+  const withLeading = raw.startsWith("/") ? raw : `/${raw}`;
+  return withLeading.endsWith("/") ? withLeading : `${withLeading}/`;
+}
+
+const base = normalizeBase(process.env.VITE_BASE);
+
 function redirectToBase(): Plugin {
   const send = (request: IncomingMessage, response: ServerResponse, next: (error?: unknown) => void) => {
     const url = request.url || "/";
     if (url === "/" || url.startsWith("/?")) {
       response.statusCode = 302;
-      response.setHeader("Location", `/framing-cam/${url.slice(1)}`);
+      response.setHeader("Location", `${base}${url.slice(1)}`);
       response.end();
       return;
     }
@@ -76,8 +85,12 @@ function redirectToBase(): Plugin {
 }
 
 export default defineConfig({
-  base: "/framing-cam/",
-  plugins: [redirectToBase(), apiPlugin(), ...(process.env.HTTPS === "1" && !certificate ? [basicSsl()] : [])],
+  base,
+  plugins: [
+    ...(base !== "/" ? [redirectToBase()] : []),
+    apiPlugin(),
+    ...(process.env.HTTPS === "1" && !certificate ? [basicSsl()] : []),
+  ],
   server: { host: true, port: 5173, https: certificate },
   preview: { host: true, port: 4173, https: certificate },
   optimizeDeps: { exclude: ["@mediapipe/tasks-vision"] },

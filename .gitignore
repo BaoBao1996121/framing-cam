@@ -8,4 +8,5 @@ public/vendor/wasm
 .vite
 coverage
 .vercel
+.netlify
 certs

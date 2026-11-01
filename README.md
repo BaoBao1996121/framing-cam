@@ -10,7 +10,7 @@ The final photo is a real crop of the camera frame, not an upscale. If the perso
 
 ## Try it on a phone
 
-The static site is [https://baobao1996121.github.io/framing-cam/](https://baobao1996121.github.io/framing-cam/). Open it in **iOS Safari** or **Android Chrome**. The published site has no server: cloud refine stays off, and framing stays on the phone.
+GitHub Pages: [https://baobao1996121.github.io/framing-cam/](https://baobao1996121.github.io/framing-cam/). Open it in **iOS Safari** or **Android Chrome**. That build has no server, so cloud refine stays off and framing stays on the phone. A Netlify deploy can turn cloud refine on; see [Deploy](#deploy).
 
 1. Tap **打开相机**. Allow the camera, and on iPhone allow motion access so the horizon can be leveled.
 2. Hand the phone to a friend. Use the rear camera. They follow the arrow and the short prompt.
@@ -31,7 +31,7 @@ On the phone, MediaPipe Pose and Face Landmarker run in a Web Worker at about 15
 
 Large errors become a single instruction for the person holding the phone. Small errors are finished by a digital crop. The crop is not allowed to throw away so many pixels that the photo goes soft; past that limit the instruction is **靠近一点**.
 
-The GitHub Pages build never calls a server. Framing, the crop, and the shutter all stay on the phone. A local dev server can still offer an optional cloud crop when `LLM_API_KEY` is set; the box is kept only if it contains the head, matches the aspect ratio, and does not cut a joint.
+The GitHub Pages build never calls a server. Framing, the crop, and the shutter all stay on the phone. Netlify (and the local dev server) can ask a vision model for a tighter crop when `LLM_API_KEY` is set. The box is kept only if it contains the head, matches the aspect ratio, and does not cut a joint. With no key, the button stays off and nothing is uploaded.
 
 Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -40,7 +40,7 @@ Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ```bash
 npm install
 npm test
-npm run dev          # http://localhost:5173/framing-cam/
+npm run dev          # http://localhost:5173/  (set VITE_BASE=/framing-cam/ to match Pages)
 npm run dev:https    # https on your LAN, self-signed certificate
 ```
 
@@ -48,7 +48,7 @@ npm run dev:https    # https on your LAN, self-signed certificate
 
 ### Phone on the same Wi-Fi
 
-Self-signed HTTPS (`npm run dev:https`) is enough for many Android phones: open `https://<your-lan-ip>:5173/framing-cam/` and continue past the warning.
+Self-signed HTTPS (`npm run dev:https`) is enough for many Android phones: open `https://<your-lan-ip>:5173/` and continue past the warning.
 
 iOS Safari is stricter. A certificate you trust locally is more reliable:
 
@@ -60,21 +60,42 @@ mkcert -key-file certs/dev-key.pem -cert-file certs/dev-cert.pem localhost 192.1
 npm run dev:mkcert
 ```
 
-Use your computer's LAN address in the `mkcert` command. Install the mkcert root CA on the iPhone (mkcert's docs describe this), then open `https://192.168.1.20:5173/framing-cam/`.
+Use your computer's LAN address in the `mkcert` command. Install the mkcert root CA on the iPhone (mkcert's docs describe this), then open `https://192.168.1.20:5173/`.
 
-Desktop `http://localhost:5173/framing-cam/` is a secure context, so the camera works there without HTTPS. Another computer on the LAN using plain `http://192.168.x.x` is not a secure context, and `getUserMedia` will fail.
+Desktop `http://localhost:5173/` is a secure context, so the camera works there without HTTPS. Another computer on the LAN using plain `http://192.168.x.x` is not a secure context, and `getUserMedia` will fail.
 
-The dev server can expose `GET /api/health` and `POST /api/frame`. Copy `.env.example` to `.env` if you want that local cloud crop. The published site does not use it. Leave `LLM_API_KEY` empty to stay rules-only even in dev.
+The dev server exposes `GET /api/health` and `POST /api/frame`. Copy `.env.example` to `.env` to try a cloud crop locally. Leave `LLM_API_KEY` empty and the app stays rules-only.
 
 ## Deploy
 
-GitHub Pages hosts the site at [https://baobao1996121.github.io/framing-cam/](https://baobao1996121.github.io/framing-cam/).
+The Vite `base` comes from `VITE_BASE` (default `/`). GitHub Pages sets `/framing-cam/`. Netlify sets `/`.
 
-Pushing `main` runs `.github/workflows/pages.yml`. It builds the Vite app with `base: '/framing-cam/'` and deploys `dist` with `actions/deploy-pages`. In the repository settings, set Pages → Build and deployment → Source to **GitHub Actions**.
+### GitHub Pages
 
-The static build does not call `/api`. Cloud refine stays off, with no failed request. Pose and face models and the wasm runtime are copied into `dist/vendor` and requested under `/framing-cam/vendor/...`.
+[https://baobao1996121.github.io/framing-cam/](https://baobao1996121.github.io/framing-cam/)
 
-There is no API key on the client. Optional cloud refine exists only on the local dev server.
+Pushing `main` runs `.github/workflows/pages.yml` with `VITE_BASE=/framing-cam/` and deploys `dist` via `actions/deploy-pages`. In the repository settings, set Pages → Build and deployment → Source to **GitHub Actions**.
+
+That build does not set `VITE_CLOUD`, so it never calls `/api`. Cloud refine stays off, with no failed request. Models and wasm load from `/framing-cam/vendor/...`.
+
+### Netlify
+
+`netlify.toml` builds the app, publishes `dist`, and serves `netlify/functions` at `/api/health` and `/api/frame`. From the repo root, with only an auth token and a site id:
+
+```bash
+NETLIFY_AUTH_TOKEN=... NETLIFY_SITE_ID=... npx netlify-cli deploy --prod --build
+```
+
+Set these in the Netlify site environment (not in the client bundle):
+
+| Variable | Purpose |
+| --- | --- |
+| `LLM_API_KEY` | Empty disables cloud refine. The health check returns `llm: false` and the button stays off. |
+| `LLM_PROVIDER` | `openai` (default), `openai-compatible`, `anthropic`, `dashscope` (aliases `qwen`, `qwen-vl`), `doubao` (aliases `volcengine`, `ark`) |
+| `LLM_BASE_URL` | Optional override. DashScope preset: `https://dashscope.aliyuncs.com/compatible-mode/v1`. Doubao preset: `https://ark.cn-beijing.volces.com/api/v3`. |
+| `LLM_MODEL` | Optional override. DashScope preset: `qwen-vl-max`. Doubao preset: `doubao-seed-2-1-pro-260628`, or your Ark endpoint id `ep-...`. |
+
+The key never reaches the browser. International DashScope is the same provider with `LLM_BASE_URL=https://dashscope-intl.aliyuncs.com/compatible-mode/v1`.
 
 ## Tests
 
@@ -95,7 +116,7 @@ Unit tests cover the coach (which way to move, including the mirrored selfie pre
 - One primary subject. Tap another face to switch. The coach does not direct the person being photographed, only the person holding the phone.
 - No filters, relighting, or beauty retouch. That is deliberate.
 - A tilted or sideways video buffer on a particular Android build can misalign the overlay. The crop and the overlay use the same buffer, so they still match each other.
-- The GitHub Pages site does not upload frames. Cloud refine exists only on the local dev server, and a bad box is dropped if it misses the head or cuts a joint.
+- GitHub Pages does not upload frames. On Netlify, cloud refine runs only when `LLM_API_KEY` is set; a bad box is dropped if it misses the head or cuts a joint. Doubao's default model id is dated — set `LLM_MODEL` to the vision model or endpoint id enabled on your Ark account.
 
 ## License
 
@@ -113,7 +134,7 @@ MIT. MediaPipe runtime and landmarker models are Apache-2.0, see `public/vendor/
 
 ## 在手机上试用
 
-静态站点：[https://baobao1996121.github.io/framing-cam/](https://baobao1996121.github.io/framing-cam/)。用 **iOS Safari** 或 **Android Chrome** 打开。发布的页面没有服务器：云端微调保持关闭，构图在手机上完成。
+GitHub Pages：[https://baobao1996121.github.io/framing-cam/](https://baobao1996121.github.io/framing-cam/)。用 **iOS Safari** 或 **Android Chrome** 打开。这个构建没有服务器，云端微调保持关闭，构图在手机上完成。若要打开云端微调，用 Netlify，见 [部署](#部署)。
 
 1. 点 **打开相机**。允许摄像头；在 iPhone 上再允许动作与方向，才能校正地平线。
 2. 把手机交给朋友，用后置摄像头。对方看箭头和那一句短提示。
@@ -134,7 +155,7 @@ MIT. MediaPipe runtime and landmarker models are Apache-2.0, see `public/vendor/
 
 偏差大的时候，只给拿手机的人一条指令。剩下的小偏差用数字裁切收干净。裁切不允许丢掉太多像素；超过限度就改口说 **靠近一点**。
 
-GitHub Pages 上的版本不会请求服务器。构图、裁切和快门都在手机里完成。本地开发服务器在设置了 `LLM_API_KEY` 时仍可以做可选的云端裁切；返回的框必须包住头、符合画幅、而且不切断关节，才会被采用。
+GitHub Pages 上的版本不会请求服务器。构图、裁切和快门都在手机里完成。Netlify 和本地开发服务器在设置了 `LLM_API_KEY` 时，可以请视觉模型给一个更紧的裁切框。框必须包住头、符合画幅、而且不切断关节，才会被采用。没有密钥时按钮保持关闭，不会上传画面。
 
 细节见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
@@ -143,7 +164,7 @@ GitHub Pages 上的版本不会请求服务器。构图、裁切和快门都在�
 ```bash
 npm install
 npm test
-npm run dev          # http://localhost:5173/framing-cam/
+npm run dev          # http://localhost:5173/  （要和 Pages 一样的子路径就设 VITE_BASE=/framing-cam/）
 npm run dev:https    # 局域网 HTTPS，自签证书
 ```
 
@@ -151,7 +172,7 @@ npm run dev:https    # 局域网 HTTPS，自签证书
 
 ### 同一 Wi-Fi 下的手机
 
-很多 Android 手机用 `npm run dev:https` 即可：打开 `https://<电脑局域网 IP>:5173/framing-cam/`，忽略证书警告。
+很多 Android 手机用 `npm run dev:https` 即可：打开 `https://<电脑局域网 IP>:5173/`，忽略证书警告。
 
 iOS Safari 对自签证书很严。更稳妥的是本地信任的证书：
 
@@ -163,21 +184,42 @@ mkcert -key-file certs/dev-key.pem -cert-file certs/dev-cert.pem localhost 192.1
 npm run dev:mkcert
 ```
 
-把命令里的地址换成你电脑的局域网 IP。按 mkcert 的说明把根证书装到 iPhone 上，然后打开 `https://192.168.1.20:5173/framing-cam/`。
+把命令里的地址换成你电脑的局域网 IP。按 mkcert 的说明把根证书装到 iPhone 上，然后打开 `https://192.168.1.20:5173/`。
 
-电脑上的 `http://localhost:5173/framing-cam/` 属于安全上下文，不装 HTTPS 也能开相机。局域网里用 `http://192.168.x.x` 则不是安全上下文，`getUserMedia` 会失败。
+电脑上的 `http://localhost:5173/` 属于安全上下文，不装 HTTPS 也能开相机。局域网里用 `http://192.168.x.x` 则不是安全上下文，`getUserMedia` 会失败。
 
-开发服务器可以提供 `GET /api/health` 和 `POST /api/frame`。只想在本地试云端裁切时，把 `.env.example` 复制为 `.env`。发布的站点不会用到它。`LLM_API_KEY` 留空时，本地也只用本机构图。
+开发服务器提供 `GET /api/health` 和 `POST /api/frame`。把 `.env.example` 复制为 `.env` 即可在本地试云端裁切。`LLM_API_KEY` 留空时只用本机构图。
 
 ## 部署
 
-GitHub Pages 地址：[https://baobao1996121.github.io/framing-cam/](https://baobao1996121.github.io/framing-cam/)。
+Vite 的 `base` 来自环境变量 `VITE_BASE`（默认 `/`）。GitHub Pages 设为 `/framing-cam/`，Netlify 设为 `/`。
 
-推送到 `main` 会运行 `.github/workflows/pages.yml`。它用 `base: '/framing-cam/'` 构建 Vite 应用，再用 `actions/deploy-pages` 发布 `dist`。仓库设置里把 Pages → Build and deployment → Source 选成 **GitHub Actions**。
+### GitHub Pages
 
-静态构建不会请求 `/api`。云端微调保持关闭，也不会出现失败请求。姿势、人脸模型和 wasm 会复制进 `dist/vendor`，并从 `/framing-cam/vendor/...` 加载。
+地址：[https://baobao1996121.github.io/framing-cam/](https://baobao1996121.github.io/framing-cam/)
 
-前端没有 API 密钥。可选的云端裁切只存在于本地开发服务器。
+推送到 `main` 会运行 `.github/workflows/pages.yml`，以 `VITE_BASE=/framing-cam/` 构建，再用 `actions/deploy-pages` 发布 `dist`。仓库设置里把 Pages → Build and deployment → Source 选成 **GitHub Actions**。
+
+这个构建不设置 `VITE_CLOUD`，因此不会请求 `/api`。云端微调保持关闭，也不会出现失败请求。模型和 wasm 从 `/framing-cam/vendor/...` 加载。
+
+### Netlify
+
+`netlify.toml` 负责构建、把 `dist` 作为发布目录，并把 `netlify/functions` 挂到 `/api/health` 和 `/api/frame`。在仓库根目录，只需要令牌和站点 id：
+
+```bash
+NETLIFY_AUTH_TOKEN=... NETLIFY_SITE_ID=... npx netlify-cli deploy --prod --build
+```
+
+在 Netlify 站点的环境变量里配置（不会打进前端包）：
+
+| 变量 | 作用 |
+| --- | --- |
+| `LLM_API_KEY` | 留空则关闭云端微调。健康检查返回 `llm: false`，按钮保持关闭。 |
+| `LLM_PROVIDER` | `openai`（默认）、`openai-compatible`、`anthropic`、`dashscope`（别名 `qwen`、`qwen-vl`）、`doubao`（别名 `volcengine`、`ark`） |
+| `LLM_BASE_URL` | 可选。DashScope 预设：`https://dashscope.aliyuncs.com/compatible-mode/v1`。豆包预设：`https://ark.cn-beijing.volces.com/api/v3`。 |
+| `LLM_MODEL` | 可选。DashScope 预设：`qwen-vl-max`。豆包预设：`doubao-seed-2-1-pro-260628`，或方舟接入点 `ep-...`。 |
+
+密钥不会到浏览器。国际站 DashScope 用同一 provider，把 `LLM_BASE_URL` 设为 `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`。
 
 ## 测试
 
@@ -198,7 +240,7 @@ npm run build
 - 默认只跟一个主体。点另一张脸可以切换。引导只对拿手机的人说话，不指挥被拍的人摆姿势。
 - 没有滤镜、补光或美颜。这是有意为之。
 - 个别 Android 机型的视频缓冲方向若和预览不一致，叠层可能对不齐。裁切和叠层使用同一块缓冲，因此它们彼此仍然一致。
-- GitHub Pages 上的站点不会上传画面。云端微调只在本地开发服务器里，不合格的框（没包住头，或切断关节）会被丢掉。
+- GitHub Pages 不会上传画面。Netlify 上只有设置了 `LLM_API_KEY` 才会做云端微调；没包住头或切断关节的框会被丢掉。豆包的默认模型名会随版本变化，请把 `LLM_MODEL` 设成你账号里已开通的视觉模型或接入点 id。
 
 ## 许可证
 

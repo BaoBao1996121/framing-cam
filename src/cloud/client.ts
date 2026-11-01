@@ -1,10 +1,20 @@
 import type { LlmSuggestion, Rect, Subject } from "../composition/types";
 
+/** Pages builds leave this unset so they never request a missing /api. Netlify sets VITE_CLOUD=1. */
+export function shouldProbeCloud(isDev: boolean, cloudFlag: string | undefined): boolean {
+  return isDev || cloudFlag === "1";
+}
+
+function apiUrl(path: string): string {
+  const base = import.meta.env.BASE_URL || "/";
+  return new URL(path.replace(/^\//, ""), new URL(base, "http://local")).pathname;
+}
+
 export async function cloudAvailable(): Promise<boolean> {
-  // The GitHub Pages build has no API. Skip the request so a 404 never shows up.
-  if (!import.meta.env.DEV) return false;
+  // Written inline so a Pages build (no VITE_CLOUD) drops the fetch entirely.
+  if (!(import.meta.env.DEV || import.meta.env.VITE_CLOUD === "1")) return false;
   try {
-    const response = await fetch("/api/health");
+    const response = await fetch(apiUrl("api/health"));
     if (!response.ok) return false;
     const body = (await response.json()) as { llm?: boolean };
     return Boolean(body.llm);
@@ -39,8 +49,8 @@ export async function requestCloudCrop(input: {
   subject: Subject | null;
   rulesBox: Rect;
 }): Promise<LlmSuggestion | null> {
-  if (!import.meta.env.DEV) return null;
-  const response = await fetch("/api/frame", {
+  if (!(import.meta.env.DEV || import.meta.env.VITE_CLOUD === "1")) return null;
+  const response = await fetch(apiUrl("api/frame"), {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({

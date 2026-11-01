@@ -63,11 +63,19 @@ Prompts are stabilized for a few frames so they do not flicker. Ready and "find 
 
 ## Cloud crop
 
-The published site is a GitHub Pages project at `base: '/framing-cam/'`. Asset URLs, including wasm and the `.task` models, are joined onto that base. The production bundle does not call `/api`, so a missing server is not a failed request. Cloud refine stays off.
+`VITE_BASE` selects the public path. GitHub Pages sets `/framing-cam/`; Netlify and local dev leave it at `/`. Asset URLs, including wasm and the `.task` models, are joined onto that base.
 
-`server/handle.ts` is imported only by the Vite dev middleware (`/api/health`, `/api/frame`). The key stays in the dev environment. The client asks `/api/health` only while `import.meta.env.DEV` is true.
+The client calls `/api/health` only in dev, or when the build was given `VITE_CLOUD=1` (Netlify). The Pages bundle omits the call, so a missing server is not a failed request.
 
-The request is one JPEG, long edge 768, plus the landmark summary and the rules box. The prompt asks for JSON: a normalized box, one move, one sentence, a confidence. The provider is OpenAI, any OpenAI-compatible base URL, or Anthropic. Invalid JSON, a box that misses the head, a box past the zoom limit, or a box that cuts a joint is discarded. Arrows stay on the local rules so a slow or wrong model cannot yank the holder around. A accepted box only replaces the crop.
+`server/handle.ts` is the shared handler. The Vite dev middleware and `netlify/functions/api.ts` both use it. `resolveLlmTarget` maps `LLM_PROVIDER` to an OpenAI-compatible preset:
+
+- `dashscope` / `qwen` / `qwen-vl` → `https://dashscope.aliyuncs.com/compatible-mode/v1`, model `qwen-vl-max`
+- `doubao` / `volcengine` / `ark` → `https://ark.cn-beijing.volces.com/api/v3`, model `doubao-seed-2-1-pro-260628`, with thinking disabled
+- `openai`, `openai-compatible`, `anthropic`, or any `LLM_BASE_URL`
+
+`LLM_BASE_URL` and `LLM_MODEL` override the preset. No `LLM_API_KEY` means `/api/health` returns `{ llm: false }` and `/api/frame` refuses the call. The key stays on the server.
+
+The request is one JPEG, long edge 768, plus the landmark summary and the rules box. The prompt asks for JSON: a normalized box, one move, one sentence, a confidence. Invalid JSON, a box that misses the head, a box past the zoom limit, or a box that cuts a joint is discarded. Arrows stay on the local rules so a slow or wrong model cannot yank the holder around. An accepted box only replaces the crop.
 
 ## Demo
 
@@ -156,11 +164,19 @@ Filters, skin smoothing, relighting, a social feed, and any instruction aimed at
 
 ## 云端裁切
 
-发布站点是 GitHub Pages 项目站，`base` 为 `/framing-cam/`。资源地址，包括 wasm 和 `.task` 模型，都接在这个 base 后面。生产包不会请求 `/api`，所以没有服务器也不会出现失败请求。云端微调保持关闭。
+`VITE_BASE` 决定公开路径。GitHub Pages 设为 `/framing-cam/`；Netlify 和本地开发保持 `/`。资源地址，包括 wasm 和 `.task` 模型，都接在这个 base 后面。
 
-`server/handle.ts` 只被 Vite 开发服务器的 `/api/health` 和 `/api/frame` 使用。密钥留在开发环境里。客户端只在 `import.meta.env.DEV` 为真时才会询问 `/api/health`。
+客户端只在开发模式，或构建时带了 `VITE_CLOUD=1`（Netlify）时，才请求 `/api/health`。Pages 的包里没有这次请求，所以没有服务器也不会出现失败请求。
 
-请求体是一张长边 768 的 JPEG，加上关键点摘要和规则框。提示词要求只返回 JSON：一个归一化的框、一个动作、一句话、一个置信度。供应商可以是 OpenAI、任何兼容 OpenAI 的地址，或 Anthropic。JSON 无效、框没有包住头、超过变焦限度、或切断关节，都会丢掉。箭头始终由本地规则决定，慢的或错的模型不能把拿手机的人拽来拽去。通过检查的框只替换裁切。
+`server/handle.ts` 是共用处理函数。Vite 开发服务器和 `netlify/functions/api.ts` 都用它。`resolveLlmTarget` 把 `LLM_PROVIDER` 映到兼容 OpenAI 的预设：
+
+- `dashscope` / `qwen` / `qwen-vl` → `https://dashscope.aliyuncs.com/compatible-mode/v1`，模型 `qwen-vl-max`
+- `doubao` / `volcengine` / `ark` → `https://ark.cn-beijing.volces.com/api/v3`，模型 `doubao-seed-2-1-pro-260628`，并关闭深度思考
+- `openai`、`openai-compatible`、`anthropic`，或任意 `LLM_BASE_URL`
+
+`LLM_BASE_URL` 和 `LLM_MODEL` 会覆盖预设。没有 `LLM_API_KEY` 时，`/api/health` 返回 `{ llm: false }`，`/api/frame` 拒绝调用。密钥只留在服务端。
+
+请求体是一张长边 768 的 JPEG，加上关键点摘要和规则框。提示词要求只返回 JSON：一个归一化的框、一个动作、一句话、一个置信度。供应商由上面的预设决定。JSON 无效、框没有包住头、超过变焦限度、或切断关节，都会丢掉。箭头始终由本地规则决定，慢的或错的模型不能把拿手机的人拽来拽去。通过检查的框只替换裁切。
 
 ## 演示
 

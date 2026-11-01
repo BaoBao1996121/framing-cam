@@ -18,6 +18,13 @@ describe("guidance state machine", () => {
     expect(step.hint).toBe("closer");
   });
 
+  it("moves sideways before it moves up or down", () => {
+    const subject: Rect = { x: 0.05, y: 0.42, w: 0.44, h: 0.5 };
+    expect(measure(subject, target).move).toBe("left");
+    const step = stepGuide(initialGuide(0), { now: 0, subject, target, rollDeg: 0, steady: true });
+    expect(step.hint).toBe("left");
+  });
+
   it("moves left when the subject is left of a same-size target", () => {
     const subject: Rect = { x: 0.02, y: 0.12, w: 0.44, h: 0.5 };
     expect(measure(subject, target).move).toBe("left");

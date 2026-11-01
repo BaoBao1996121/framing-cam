@@ -101,8 +101,9 @@ let lastSpoken = "";
 export function speakPrompt(text: string, locale: string): void {
   if (!("speechSynthesis" in window) || !text) return;
   const now = performance.now();
-  if (text === lastSpoken && now - lastSpokenAt < 4000) return;
-  if (now - lastSpokenAt < 1800) return;
+  const urgent = /^\d$/.test(text);
+  if (!urgent && text === lastSpoken && now - lastSpokenAt < 4000) return;
+  if (!urgent && now - lastSpokenAt < 1800) return;
   lastSpoken = text;
   lastSpokenAt = now;
   window.speechSynthesis.cancel();

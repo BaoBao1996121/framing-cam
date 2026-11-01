@@ -56,7 +56,7 @@ export class VisionClient {
   private startWorker(): void {
     const worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
     this.worker = worker;
-    this.workerTimer = window.setTimeout(() => this.fallback("超时"), 12000);
+    this.workerTimer = window.setTimeout(() => this.fallback("超时"), 25000);
     worker.onmessage = (event: MessageEvent<WorkerData>) => {
       if (this.worker !== worker) return;
       const data = event.data;

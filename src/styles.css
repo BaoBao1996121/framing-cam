@@ -256,14 +256,20 @@ video.mirror, canvas.preview.mirror { transform: scaleX(-1); }
   bottom: calc(118px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
   margin: 0;
-  padding: 3px 8px;
+  padding: 8px 16px;
   border-radius: 999px;
-  background: rgba(22, 19, 15, 0.45);
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
+  background: rgba(22, 19, 15, 0.62);
+  font-size: 22px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
   text-align: center;
   pointer-events: none;
+  white-space: nowrap;
+}
+
+body[data-shoot="self"] #prompt {
+  font-size: 28px;
+  padding: 12px 20px;
 }
 
 #prompt[data-tone="ready"] { color: var(--ready); }
@@ -342,6 +348,22 @@ video.mirror, canvas.preview.mirror { transform: scaleX(-1); }
   stroke-linecap: round;
   stroke-dasharray: 251.3;
   stroke-dashoffset: calc(251.3 * (1 - var(--align, 0)));
+}
+
+.prep-chip {
+  position: absolute;
+  z-index: 6;
+  top: calc(58px + env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(22, 19, 15, 0.55);
+  color: var(--ivory);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
 }
 
 .scorebar {

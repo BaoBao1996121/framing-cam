@@ -3,7 +3,7 @@ import { attachCamera, grabInferencePixels, stopStream, type Facing } from "../c
 import { ASPECTS, ASPECT_IDS, type AspectId, type FramePlan, type GuidanceCode, type LlmSuggestion, type Rect, type Subject } from "../composition/types";
 import { frameAroundTarget } from "../composition/geometry";
 import { planFrame, stabilizeGuidance, type GuidanceMemory } from "../composition/plan";
-import { assignIds, detectSubjects, selectSubject, smoothSubject, subjectRegion, type TrackPoint } from "../composition/subject";
+import { assignIds, detectSubjects, selectSubject, smoothSubject, subjectFromFaceAndPose, subjectRegion, type TrackPoint } from "../composition/subject";
 import { AutoShutter, SteadyDetector } from "../composition/steady";
 import { cloudAvailable, requestShotPlans } from "../cloud/client";
 import { initialGuide, stepGuide, type GuideMemory as ShotGuideMemory } from "../guidance/machine";
@@ -69,10 +69,14 @@ class CameraApp {
   private locale: LocaleId = "zh-CN";
   private aspect: AspectId = "4:5";
   private facing: Facing = "environment";
+  private shoot: "other" | "self" = "other";
+  private alignedSince = 0;
+  private frameCamera = false;
+  private visionTries = 0;
+  private visionInFlight: Promise<void> | null = null;
   private mode: Mode = "camera";
   private screen: ScreenName = "gate";
   private auto = true;
-  private voice = false;
   private cloudWanted = true;
   private cloudOk = false;
   private demoAuto = false;
@@ -143,14 +147,20 @@ class CameraApp {
           document.body.dataset.visionError = error instanceof Error ? error.message : String(error);
         });
     }
+    if (params.get("mode") === "self") {
+      this.shoot = "self";
+      this.facing = "user";
+      document.body.dataset.shoot = "self";
+    }
     const demo = params.get("demo");
     if (demo === "1" || demo === "auto") this.openDemo(demo === "auto");
+    else void this.ensureVision();
     if (params.has("probe")) this.exposeProbe();
   }
 
   private probeHold = false;
   private probeSize: { width: number; height: number } | null = null;
-  private probeWait: ((result: { faces: number; poses: number; frameWidth: number; frameHeight: number }) => void) | null = null;
+  private probeWait: ((result: { faces: number; poses: number; frameWidth: number; frameHeight: number; box: string }) => void) | null = null;
 
   private exposeProbe(): void {
     const host = window as unknown as {
@@ -205,7 +215,7 @@ class CameraApp {
     });
     must<HTMLButtonElement>("open-about").addEventListener("click", () => this.about.showModal());
     must<HTMLButtonElement>("about-close").addEventListener("click", () => this.about.close());
-    must<HTMLButtonElement>("flip").addEventListener("click", () => void this.flip());
+    this.renderModes();
     must<HTMLButtonElement>("auto").addEventListener("click", () => {
       this.auto = !this.auto;
       this.autoShutter = new AutoShutter();
@@ -336,6 +346,60 @@ class CameraApp {
 
   private applyToggles(): void {
     press("auto", this.auto, this.copy.auto);
+    this.renderModes();
+  }
+
+  private renderModes(): void {
+    const row = document.getElementById("modes");
+    if (!row) return;
+    row.replaceChildren();
+    const options: ["other" | "self", string][] = [
+      ["other", this.copy.modeOther],
+      ["self", this.copy.modeSelf],
+    ];
+    for (const [id, label] of options) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = label;
+      button.setAttribute("aria-pressed", String(this.shoot === id));
+      button.addEventListener("click", () => void this.setShoot(id));
+      row.append(button);
+    }
+  }
+
+  private async setShoot(mode: "other" | "self"): Promise<void> {
+    if (this.shoot === mode) return;
+    this.shoot = mode;
+    this.alignedSince = 0;
+    this.countdownEnds = 0;
+    document.body.dataset.shoot = mode;
+    this.renderModes();
+    const next: Facing = mode === "self" ? "user" : "environment";
+    if (this.mode === "camera" && this.facing !== next) {
+      this.facing = next;
+      stopStream(this.stream);
+      try {
+        this.stream = await attachCamera(this.video, this.facing);
+        this.video.classList.toggle("mirror", this.facing === "user");
+        this.resetTracking();
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.showToast(`${this.copy.cameraError} ${reason}`);
+      }
+    } else {
+      this.facing = next;
+    }
+  }
+
+  private phrase(code: GuidanceCode): string {
+    return (this.shoot === "self" ? this.copy.selfie : this.copy.holder)[code];
+  }
+
+  private setPreparing(on: boolean): void {
+    const chip = document.getElementById("preparing");
+    if (!chip) return;
+    chip.hidden = !on;
+    chip.textContent = this.copy.preparing;
   }
 
   private async openCamera(): Promise<void> {
@@ -345,12 +409,27 @@ class CameraApp {
     }
     const button = must<HTMLButtonElement>("open-camera");
     button.disabled = true;
-    this.showToast(this.copy.loading);
     try {
       await this.motion.request();
       unlockAudio();
-      await this.ensureVision();
       this.cameraOpenedAt = performance.now();
+      if (new URLSearchParams(location.search).get("fakecam") === "frames") {
+        this.frameCamera = true;
+        this.mode = "camera";
+        this.video.hidden = true;
+        this.demoCanvas.hidden = false;
+        this.demoCanvas.width = 480;
+        this.demoCanvas.height = 640;
+        this.demoCanvas.classList.toggle("mirror", this.facing === "user");
+        must<HTMLElement>("badge").hidden = true;
+        must<HTMLElement>("demo-pad").hidden = true;
+        this.resetTracking();
+        this.show("live");
+        this.startLoop();
+        this.setPreparing(!this.vision?.ready);
+        void this.ensureVision();
+        return;
+      }
       this.stream = await attachCamera(this.video, this.facing);
       this.mode = "camera";
       this.video.hidden = false;
@@ -358,11 +437,11 @@ class CameraApp {
       this.video.classList.toggle("mirror", this.facing === "user");
       must<HTMLElement>("badge").hidden = true;
       must<HTMLElement>("demo-pad").hidden = true;
-      must<HTMLButtonElement>("flip").hidden = false;
       this.resetTracking();
       this.show("live");
       this.startLoop();
-      this.hideToast();
+      this.setPreparing(!this.vision?.ready);
+      void this.ensureVision();
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       this.showToast(reason ? `${this.copy.cameraError} ${reason}` : this.copy.cameraError);
@@ -383,25 +462,11 @@ class CameraApp {
     this.video.hidden = true;
     must<HTMLElement>("badge").hidden = false;
     must<HTMLElement>("demo-pad").hidden = false;
-    must<HTMLButtonElement>("flip").hidden = true;
     this.buildPad();
     this.resetTracking();
     this.show("live");
     this.startLoop();
     void this.ensureVision();
-  }
-
-  private async flip(): Promise<void> {
-    if (this.mode !== "camera") return;
-    this.facing = this.facing === "environment" ? "user" : "environment";
-    stopStream(this.stream);
-    try {
-      this.stream = await attachCamera(this.video, this.facing);
-      this.video.classList.toggle("mirror", this.facing === "user");
-      this.resetTracking();
-    } catch {
-      this.showToast(this.copy.cameraError);
-    }
   }
 
   private resetTracking(): void {
@@ -451,6 +516,9 @@ class CameraApp {
         this.lastGrab = time;
         void this.sendDemoFrame(time);
       }
+    } else if (this.frameCamera && time - this.lastGrab > 80) {
+      this.lastGrab = time;
+      void this.sendCanvasFrame(time);
     } else if (!this.cameraPaced && this.video.readyState >= 2 && time - this.lastGrab > (this.vision?.place === "main" ? 120 : 66)) {
       this.lastGrab = time;
       void this.sendFrame(time);
@@ -483,6 +551,18 @@ class CameraApp {
     });
   }
 
+  private async sendCanvasFrame(time: number): Promise<void> {
+    if (!this.vision?.ready || this.demoCanvas.width < 2) return;
+    try {
+      const pixels = grabInferencePixels(this.demoCanvas, this.demoCanvas.width, this.demoCanvas.height);
+      this.vision.send(pixels, time);
+      const subject = selectSubject(this.subjects, this.selectedId);
+      if (subject) this.steady.pushLandmark(time, subject.eye.x, subject.eye.y);
+    } catch (error) {
+      this.noteVisionFailure(error instanceof Error ? error.message : "frame", true);
+    }
+  }
+
   private async sendFrame(time: number): Promise<void> {
     if (!this.vision?.ready || this.video.videoWidth < 2 || this.video.videoHeight < 2) return;
     try {
@@ -506,7 +586,16 @@ class CameraApp {
       if (matches) {
         const resolve = this.probeWait;
         this.probeWait = null;
-        resolve({ faces: perception.faces.length, poses: perception.poses.length, frameWidth, frameHeight });
+        const face = perception.faces[0];
+        const made = face ? subjectFromFaceAndPose(face, perception.poses[0] ?? null) : null;
+        const box = made ? subjectRegion({ ...made, id: "probe" }) : null;
+        resolve({
+          faces: perception.faces.length,
+          poses: perception.poses.length,
+          frameWidth,
+          frameHeight,
+          box: box ? [box.x, box.y, box.w, box.h].map((value) => Number(value.toFixed(3))).join(",") : "",
+        });
       }
     }
     if (this.mode === "demo") return;
@@ -796,18 +885,22 @@ class CameraApp {
       bar = step.score;
       readyNow = step.hint === "ready" && !stale;
       promptCode = step.hint === "hold" ? "steady" : step.hint;
-      promptText = stale ? this.copy.stale : this.copy.short[promptCode];
+      promptText = stale ? this.copy.stale : this.phrase(promptCode);
       this.rawGuidance = promptCode;
-      if (this.screen === "live" && this.auto && readyNow) {
-        if (this.countdownMs > 0) {
-          if (!this.countdownEnds) this.countdownEnds = time + this.countdownMs;
-          promptText = String(Math.max(1, Math.ceil((this.countdownEnds - time) / 1000)));
-          if (time >= this.countdownEnds) this.capture();
-        } else {
+      if (!readyNow) {
+        this.alignedSince = 0;
+        this.countdownEnds = 0;
+      } else if (this.screen === "live" && this.auto) {
+        if (!this.alignedSince) this.alignedSince = time;
+        const held = time - this.alignedSince;
+        if (this.shoot === "self") {
+          if (!this.countdownEnds) this.countdownEnds = this.alignedSince + 3000;
+          const left = Math.max(1, Math.ceil((this.countdownEnds - time) / 1000));
+          promptText = String(left);
+          if (time >= this.countdownEnds && held >= 1000) this.capture();
+        } else if (held >= 1000) {
           this.capture();
         }
-      } else {
-        this.countdownEnds = 0;
       }
     } else {
       const staleEl = document.getElementById("stale");
@@ -816,13 +909,12 @@ class CameraApp {
       const stable = stabilizeGuidance(this.guidanceMemory, plan.guidance);
       this.guidanceMemory = stable.memory;
       promptCode = stable.code;
-      promptText = this.copy.short[stable.code];
+      promptText = this.phrase(stable.code);
       if (this.screen === "live") {
         const fire = this.autoShutter.update(plan.ready);
         if (fire && this.auto) this.capture();
       }
     }
-    const stableCode = promptCode;
     this.prompt.textContent = promptText;
     this.prompt.dataset.tone = readyNow ? "ready" : promptCode === "closer" || promptCode === "back" ? "warn" : "move";
     const scorebar = document.getElementById("scorebar");
@@ -844,10 +936,11 @@ class CameraApp {
       guideSubject: region,
       guideAligned,
       guideHint: promptCode,
+      guideScore: bar,
     });
-    if (this.voice && stableCode !== this.spokenCode) {
-      this.spokenCode = stableCode;
-      speakPrompt(promptText, this.locale);
+    if (this.shoot === "self" && promptText !== this.spokenCode) {
+      this.spokenCode = promptText;
+      speakPrompt(promptText, this.locale === "en" ? "en" : "zh-CN");
     }
     if (readyNow && !this.wasReady) {
       pulse(28);
@@ -855,6 +948,14 @@ class CameraApp {
     }
     this.wasReady = readyNow;
     document.body.dataset.guidance = promptCode;
+    document.body.dataset.prompt = promptText;
+    document.body.dataset.shoot = this.shoot;
+    document.body.dataset.model = this.vision?.ready ? "ready" : "wait";
+    document.body.dataset.ready = readyNow ? "1" : "0";
+    if (region) {
+      document.body.dataset.subject = [region.x, region.y, region.w, region.h].map((value) => value.toFixed(3)).join(",");
+    }
+    this.setPreparing(this.screen === "live" && !this.vision?.ready);
     this.paintDebug();
   }
 
@@ -879,6 +980,7 @@ class CameraApp {
     const source = this.currentSource();
     if (!source) return;
     this.capturing = true;
+    document.body.dataset.captured = "1";
     const best = pickSharpest(this.snaps.filter((snap) => performance.now() - snap.at < 1200));
     const chosen = best ?? { canvas: source.canvas };
     const subject = selectSubject(this.subjects, this.selectedId);
@@ -904,7 +1006,7 @@ class CameraApp {
   }
 
   private currentSource(): { canvas: HTMLCanvasElement; width: number; height: number } | null {
-    if (this.mode === "demo") {
+    if (this.mode === "demo" || this.frameCamera) {
       if (this.demoCanvas.width < 2) return null;
       return { canvas: this.demoCanvas, width: this.demoCanvas.width, height: this.demoCanvas.height };
     }
@@ -1024,14 +1126,35 @@ class CameraApp {
   }
 
   private ensureVision(): Promise<void> {
+    if (this.vision?.ready) {
+      this.setPreparing(false);
+      return Promise.resolve();
+    }
+    if (this.visionInFlight) return this.visionInFlight;
+    this.visionTries = 0;
+    this.visionInFlight = this.attemptVision().finally(() => {
+      this.visionInFlight = null;
+    });
+    return this.visionInFlight;
+  }
+
+  private attemptVision(): Promise<void> {
+    this.visionTries += 1;
+    this.setPreparing(this.screen === "live");
     return this.bootVision().then(
       () => {
         this.visionFaults = 0;
         this.setVisionStatus("");
+        this.setPreparing(false);
+        document.body.dataset.model = "ready";
+        document.body.dataset.modelAt = String(Math.round(performance.now()));
       },
       (error: unknown) => {
+        this.visionBoot = null;
+        if (this.visionTries < 2) return this.attemptVision();
         const reason = error instanceof Error ? error.message : String(error);
         this.noteVisionFailure(reason, false);
+        this.setPreparing(false);
       },
     );
   }
@@ -1069,7 +1192,7 @@ class CameraApp {
       const timer = window.setTimeout(() => {
         client.close();
         reject(new Error(this.copy.modelTimeout));
-      }, 32000);
+      }, 50000);
       const paths = {
         wasmPath: vendorUrl("vendor/wasm"),
         poseModel: vendorUrl("vendor/models/pose_landmarker_lite.task"),
@@ -1133,11 +1256,11 @@ class CameraApp {
   }
 
   private get imageWidth(): number {
-    return this.mode === "demo" ? this.demoCanvas.width : this.video.videoWidth;
+    return this.mode === "demo" || this.frameCamera ? this.demoCanvas.width : this.video.videoWidth;
   }
 
   private get imageHeight(): number {
-    return this.mode === "demo" ? this.demoCanvas.height : this.video.videoHeight;
+    return this.mode === "demo" || this.frameCamera ? this.demoCanvas.height : this.video.videoHeight;
   }
 
   private showToast(message: string): void {
@@ -1145,9 +1268,6 @@ class CameraApp {
     this.toast.textContent = message;
   }
 
-  private hideToast(): void {
-    this.toast.hidden = true;
-  }
 }
 
 function must<T extends HTMLElement>(id: string): T {

@@ -3,6 +3,16 @@ import { inferenceSize } from "./pixels";
 export type Facing = "environment" | "user";
 
 export async function attachCamera(video: HTMLVideoElement, facing: Facing): Promise<MediaStream> {
+  const fake = new URLSearchParams(location.search).get("fakecam");
+  if (fake) {
+    video.src = fake;
+    video.loop = true;
+    video.muted = true;
+    video.playsInline = true;
+    await video.play();
+    await waitForVideoSize(video, 4000);
+    return new MediaStream();
+  }
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: false,
     video: {

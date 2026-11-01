@@ -13,7 +13,7 @@ The final photo is a real crop of the camera frame, not an upscale. If the perso
 GitHub Pages: [https://baobao1996121.github.io/framing-cam/](https://baobao1996121.github.io/framing-cam/). Open it in **iOS Safari** or **Android Chrome**. That build has no server, so cloud refine stays off and framing stays on the phone. A Netlify deploy can turn cloud refine on; see [Deploy](#deploy).
 
 1. Tap **打开相机**. Allow the camera, and on iPhone allow motion access so the horizon can be leveled.
-2. Hand the phone to a friend. Use the rear camera. They move until the solid figure sits on the dashed one. The arrow is the phone move; the two-character label under it is the same cue.
+2. Choose **拍别人** (rear camera) or **自拍** (front camera). In the first mode the words tell the holder how to move the phone, such as 手机往左 or 往前走一步. Selfie mode speaks the cue and counts 3-2-1.
 3. The ring turns green and, with **自动** on, the shutter fires. Tap the shutter any time.
 4. Save the current frame, or save all three: **4:5**, **3:4**, and **9:16**. On iPhone you can also long-press the photo.
 
@@ -139,7 +139,7 @@ MIT. MediaPipe runtime and landmarker models are Apache-2.0, see `public/vendor/
 GitHub Pages：[https://baobao1996121.github.io/framing-cam/](https://baobao1996121.github.io/framing-cam/)。用 **iOS Safari** 或 **Android Chrome** 打开。这个构建没有服务器，云端微调保持关闭，构图在手机上完成。若要打开云端微调，用 Netlify，见 [部署](#部署)。
 
 1. 点 **打开相机**。允许摄像头；在 iPhone 上再允许动作与方向，才能校正地平线。
-2. 把手机交给朋友，用后置摄像头。把实线人影挪到虚线上。箭头是手机该移动的方向，下面两个字是同一句提示。
+2. 顶部选 **拍别人**（后置）或 **自拍**（前置）。拍别人时文字是给拿手机的人的，例如「手机往左」「往前走一步」。自拍会朗读提示，对准后 3、2、1 再拍。
 3. 圆环变绿后，开着 **自动** 就会拍。也可以随时按快门。
 4. 保存当前画幅，或一次保存 **4:5**、**3:4**、**9:16**。iPhone 上也可以长按照片保存。
 

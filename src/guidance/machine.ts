@@ -69,8 +69,10 @@ export function measure(subject: Rect, target: Rect): { error: number; sizeNorm:
   let move: GuideHint = "hold";
   if (sizeNorm >= 1 && sizeNorm >= posNorm * 0.85) {
     move = ratio < 1 ? "closer" : "back";
-  } else if (Math.abs(dx) >= POSITION_TOLERANCE || Math.abs(dy) >= POSITION_TOLERANCE) {
-    move = Math.abs(dx) >= Math.abs(dy) ? (dx < 0 ? "left" : "right") : dy < 0 ? "up" : "down";
+  } else if (Math.abs(dx) >= POSITION_TOLERANCE) {
+    move = dx < 0 ? "left" : "right";
+  } else if (Math.abs(dy) >= POSITION_TOLERANCE) {
+    move = dy < 0 ? "up" : "down";
   }
   return { error, sizeNorm, posNorm, move };
 }
@@ -80,6 +82,9 @@ function desiredHint(sample: GuideSample, aligned: boolean): { hint: GuideHint; 
   const reading = measure(sample.subject, sample.target);
   if (reading.sizeNorm >= 1 && reading.sizeNorm >= reading.posNorm * 0.85) {
     return { hint: reading.move, phase: "distance", error: reading.error };
+  }
+  if (reading.move === "left" || reading.move === "right" || reading.move === "up" || reading.move === "down") {
+    return { hint: reading.move, phase: "position", error: reading.error };
   }
   if (sample.rollDeg != null && Math.abs(sample.rollDeg) > 4.5 && Math.abs(sample.rollDeg) < 50) {
     return {

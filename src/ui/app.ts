@@ -22,6 +22,7 @@ import { zipStore } from "../export/zip";
 import { coverTransform, screenToImage } from "../composition/geometry";
 import { drawOverlay, strokeFigure } from "./overlay";
 import { vendorUrl, VisionClient } from "../vision/client";
+import { prefersMainThread } from "../vision/loader";
 
 type SpeechRec = {
   lang: string;
@@ -116,6 +117,7 @@ class CameraApp {
   private lastDetectError = "";
   private visionFaults = 0;
   private cameraOpenedAt = 0;
+  private cameraPaced = false;
   private recognition: SpeechRec | null = null;
   private shot: Shot | null = null;
   private reviewUrl = "";
@@ -361,8 +363,9 @@ class CameraApp {
       this.show("live");
       this.startLoop();
       this.hideToast();
-    } catch {
-      this.showToast(this.copy.cameraError);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.showToast(reason ? `${this.copy.cameraError} ${reason}` : this.copy.cameraError);
     } finally {
       button.disabled = false;
     }
@@ -448,7 +451,7 @@ class CameraApp {
         this.lastGrab = time;
         void this.sendDemoFrame(time);
       }
-    } else if (this.video.readyState >= 2 && time - this.lastGrab > 66) {
+    } else if (!this.cameraPaced && this.video.readyState >= 2 && time - this.lastGrab > (this.vision?.place === "main" ? 120 : 66)) {
       this.lastGrab = time;
       void this.sendFrame(time);
       if (this.video.videoWidth < 2 && this.cameraOpenedAt && time - this.cameraOpenedAt > 4000) {
@@ -467,6 +470,17 @@ class CameraApp {
     } catch (error) {
       this.noteVisionFailure(error instanceof Error ? error.message : "frame", true);
     }
+  }
+
+  private armCameraCallback(): void {
+    const video = this.video;
+    if (this.vision?.place !== "main" || !video.requestVideoFrameCallback) return;
+    this.cameraPaced = true;
+    video.requestVideoFrameCallback(() => {
+      if (!this.cameraPaced || !this.running || this.screen !== "live" || this.mode !== "camera") return;
+      void this.sendFrame(performance.now());
+      this.armCameraCallback();
+    });
   }
 
   private async sendFrame(time: number): Promise<void> {
@@ -850,6 +864,7 @@ class CameraApp {
     const fps = this.detectTimes.length;
     panel.textContent = [
       `detector ${this.vision?.ready ? "ok" : "off"} ${this.vision?.delegate || "—"}`,
+      this.vision?.place === "main" && this.vision.note ? `worker ${this.vision.note.slice(0, 80)}` : "",
       `face ${this.vision?.faceReady ? "ok" : "no"}  ${fps} fps`,
       `faces ${this.faceCount}  poses ${this.poseCount}`,
       `people ${this.subjects.length}`,
@@ -1054,16 +1069,18 @@ class CameraApp {
       const timer = window.setTimeout(() => {
         client.close();
         reject(new Error(this.copy.modelTimeout));
-      }, 18000);
+      }, 32000);
       const paths = {
         wasmPath: vendorUrl("vendor/wasm"),
         poseModel: vendorUrl("vendor/models/pose_landmarker_lite.task"),
         faceModel: vendorUrl("vendor/models/face_landmarker.task"),
         cpuOnly: this.preferCpu(),
+        mainThread: prefersMainThread(navigator.userAgent),
       };
-      client.onReady = () => {
+        client.onReady = () => {
         window.clearTimeout(timer);
         this.vision = client;
+        this.armCameraCallback();
         client.onResult = (perception) => {
           if (this.visionFaults > 0) {
             this.visionFaults = 0;

@@ -13,11 +13,19 @@ export class MotionLevel {
   }
 
   async request(): Promise<void> {
-    const motion = DeviceMotionEvent as unknown as { requestPermission?: () => Promise<string> };
-    const orientation = DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> };
+    const host = globalThis as typeof globalThis & {
+      DeviceMotionEvent?: { requestPermission?: () => Promise<string> };
+      DeviceOrientationEvent?: { requestPermission?: () => Promise<string> };
+    };
     const asks: Promise<unknown>[] = [];
-    if (typeof motion.requestPermission === "function") asks.push(motion.requestPermission().catch(() => "denied"));
-    if (typeof orientation.requestPermission === "function") asks.push(orientation.requestPermission().catch(() => "denied"));
+    const motion = host.DeviceMotionEvent;
+    const orientation = host.DeviceOrientationEvent;
+    if (typeof motion?.requestPermission === "function") {
+      asks.push(motion.requestPermission().catch(() => "denied"));
+    }
+    if (typeof orientation?.requestPermission === "function") {
+      asks.push(orientation.requestPermission().catch(() => "denied"));
+    }
     await Promise.all(asks);
     window.addEventListener("deviceorientation", this.onOrientation);
     window.addEventListener("devicemotion", this.onMotion);

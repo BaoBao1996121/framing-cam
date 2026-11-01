@@ -67,10 +67,14 @@ export function downloadBlob(blob: Blob, filename: string): void {
 let audio: AudioContext | null = null;
 
 export function unlockAudio(): void {
-  const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-  if (!Ctx) return;
-  if (!audio) audio = new Ctx();
-  void audio.resume().catch(() => undefined);
+  try {
+    const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctx) return;
+    if (!audio) audio = new Ctx();
+    void audio.resume().catch(() => undefined);
+  } catch {
+    /* A refused audio context must not block the camera. */
+  }
 }
 
 export function shutterClick(): void {

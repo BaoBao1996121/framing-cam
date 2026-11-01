@@ -14,11 +14,15 @@ export const en = {
   close: "Close",
   credit:
     "Inspired by the real-time composition guidance in Doka Cam. This is an independent open-source web camera. It is not affiliated with Doka or its makers, and it does not copy their interface, models, or assets.",
-  how: "The phone finds you from pose or from the face alone. Two outlines and an arrow do the coaching, then it shoots when they overlap. iPhone detection runs on the CPU.",
+  how: "The phone finds you from pose or from the face alone. The models and wasm are served by this site. If they fail to load, the reason stays on screen.",
   loading: "Preparing the composition models…",
   cameraError: "The camera did not open. Allow camera access, and make sure this page is HTTPS.",
   insecure: "Mobile browsers only allow the camera on HTTPS. Use npm run dev:https, or open a deployed URL.",
   modelError: "The composition models did not load. You can still try the demo, or reload.",
+  modelFail: "Recognition model failed to load",
+  modelTimeout: "timed out",
+  detectFail: "Recognition failed",
+  frameFail: "The camera frame is 0×0, so recognition has nothing to read",
   retry: "Try again",
   promptLive: "Composition cue",
   guidance: {

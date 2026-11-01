@@ -2,7 +2,7 @@ import { FaceLandmarker, FilesetResolver, PoseLandmarker } from "@mediapipe/task
 import type { RawFace, RawPoint, RawPose } from "../composition/subject";
 
 type InitMessage = { type: "init"; wasmPath: string; poseModel: string; faceModel: string; cpuOnly?: boolean };
-type FrameMessage = { type: "frame"; bitmap: ImageBitmap; timestamp: number };
+type FrameMessage = { type: "frame"; width: number; height: number; buffer: ArrayBuffer; timestamp: number };
 
 const FACE = {
   forehead: 10,
@@ -78,7 +78,14 @@ function slimPoses(landmarks: { x: number; y: number; visibility?: number }[][])
   }));
 }
 
-async function createPose(vision: Awaited<ReturnType<typeof FilesetResolver.forVisionTasks>>, model: string, cpuOnly: boolean) {
+async function freshVision(): Promise<Awaited<ReturnType<typeof FilesetResolver.forVisionTasks>>> {
+  const scope = self as typeof self & { ModuleFactory?: (module?: unknown) => Promise<unknown> };
+  if (!factory) throw new Error("ModuleFactory not set");
+  scope.ModuleFactory = factory;
+  return FilesetResolver.forVisionTasks(wasmBase, true);
+}
+
+async function createPose(model: string, cpuOnly: boolean) {
   const options = {
     runningMode: "VIDEO" as const,
     numPoses: 2,
@@ -87,18 +94,24 @@ async function createPose(vision: Awaited<ReturnType<typeof FilesetResolver.forV
     minTrackingConfidence: 0.35,
     outputSegmentationMasks: false,
   };
-  const base = { modelAssetPath: model, delegate: cpuOnly ? "CPU" as const : "GPU" as const };
-  if (!cpuOnly) {
-    try {
-      return await PoseLandmarker.createFromOptions(vision, { ...options, baseOptions: base });
-    } catch {
-      /* iOS GPU often accepts the option and then fails at runtime. */
-    }
+  const make = async (delegate: "CPU" | "GPU") => {
+    const vision = await freshVision();
+    return PoseLandmarker.createFromOptions(vision, {
+      ...options,
+      baseOptions: { modelAssetPath: model, delegate },
+    });
+  };
+  if (cpuOnly) return make("CPU");
+  try {
+    return await make("GPU");
+  } catch {
+    cpuOnly = true;
+    delegate = "CPU";
+    return make("CPU");
   }
-  return PoseLandmarker.createFromOptions(vision, { ...options, baseOptions: { ...base, delegate: "CPU" } });
 }
 
-async function createFace(vision: Awaited<ReturnType<typeof FilesetResolver.forVisionTasks>>, model: string, cpuOnly: boolean) {
+async function createFace(model: string, cpuOnly: boolean) {
   const options = {
     runningMode: "VIDEO" as const,
     numFaces: 2,
@@ -108,15 +121,19 @@ async function createFace(vision: Awaited<ReturnType<typeof FilesetResolver.forV
     outputFaceBlendshapes: false,
     outputFacialTransformationMatrixes: false,
   };
-  const base = { modelAssetPath: model, delegate: cpuOnly ? "CPU" as const : "GPU" as const };
-  if (!cpuOnly) {
-    try {
-      return await FaceLandmarker.createFromOptions(vision, { ...options, baseOptions: base });
-    } catch {
-      /* Fall through to CPU. */
-    }
+  const make = async (useCpu: boolean) => {
+    const vision = await freshVision();
+    return FaceLandmarker.createFromOptions(vision, {
+      ...options,
+      baseOptions: { modelAssetPath: model, delegate: useCpu ? "CPU" : "GPU" },
+    });
+  };
+  if (cpuOnly) return make(true);
+  try {
+    return await make(false);
+  } catch {
+    return make(true);
   }
-  return FaceLandmarker.createFromOptions(vision, { ...options, baseOptions: { ...base, delegate: "CPU" } });
 }
 
 let cpuOnly = false;
@@ -139,15 +156,14 @@ async function buildModels(forceCpu: boolean): Promise<void> {
   closeModels();
   cpuOnly = forceCpu || cpuOnly;
   delegate = cpuOnly ? "CPU" : "GPU";
-  const scope = self as typeof self & { ModuleFactory?: (module?: unknown) => Promise<unknown> };
-  scope.ModuleFactory = factory;
-  const vision = await FilesetResolver.forVisionTasks(wasmBase, true);
-  pose = await createPose(vision, poseModel, cpuOnly);
-  if (delegate === "GPU" && cpuOnly) delegate = "CPU";
   try {
-    scope.ModuleFactory = factory;
-    const faceVision = await FilesetResolver.forVisionTasks(wasmBase, true);
-    face = await createFace(faceVision, faceModel, cpuOnly);
+    pose = await createPose(poseModel, cpuOnly);
+  } catch (error) {
+    throw new Error(`pose ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (cpuOnly) delegate = "CPU";
+  try {
+    face = await createFace(faceModel, cpuOnly);
     faceError = "";
   } catch (error) {
     face = null;
@@ -155,9 +171,7 @@ async function buildModels(forceCpu: boolean): Promise<void> {
     if (!cpuOnly) {
       cpuOnly = true;
       delegate = "CPU";
-      scope.ModuleFactory = factory;
-      const faceVision = await FilesetResolver.forVisionTasks(wasmBase, true);
-      face = await createFace(faceVision, faceModel, true);
+      face = await createFace(faceModel, true);
       faceError = "";
     }
   }
@@ -171,9 +185,22 @@ self.onmessage = async (event: MessageEvent<InitMessage | FrameMessage>) => {
       poseModel = message.poseModel;
       faceModel = message.faceModel;
       const scope = self as typeof self & { ModuleFactory?: (module?: unknown) => Promise<unknown> };
-      await import(`${wasmBase}/vision_wasm_module_internal.js`);
-      factory = scope.ModuleFactory;
-      await buildModels(Boolean(message.cpuOnly));
+      const imported = (await import(`${wasmBase}/vision_wasm_module_internal.js`)) as {
+        default?: (module?: unknown) => Promise<unknown>;
+      };
+      // Safari's module worker does not keep the script's `globalThis.ModuleFactory` assignment.
+      // The file also default-exports the factory, so install that onto the worker global ourselves.
+      factory = imported.default ?? scope.ModuleFactory;
+      if (typeof factory !== "function") {
+        throw new Error(`factory missing keys=${Object.keys(imported).join(",") || "none"}`);
+      }
+      scope.ModuleFactory = factory;
+      try {
+        await buildModels(Boolean(message.cpuOnly));
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new Error(reason.startsWith("pose ") || reason.startsWith("face ") || reason.startsWith("fileset ") ? reason : `load ${reason}`);
+      }
       post({ type: "ready", pose: true, face: face != null, faceError, delegate });
     } catch (error) {
       post({ type: "error", message: error instanceof Error ? error.message : String(error) });
@@ -181,23 +208,20 @@ self.onmessage = async (event: MessageEvent<InitMessage | FrameMessage>) => {
     return;
   }
 
-  const bitmap = message.bitmap;
-  if (!pose || rebuilding) {
-    bitmap.close();
-    return;
-  }
+  if (!pose || rebuilding) return;
   try {
+    const image = imageFromPixels(message);
     if (message.timestamp > poseTime) poseTime = message.timestamp;
     else poseTime += 1;
     const started = performance.now();
-    const poseResult = pose.detectForVideo(bitmap, poseTime);
+    const poseResult = pose.detectForVideo(image, poseTime);
     frameCount += 1;
     const poseCount = poseResult.landmarks.length;
     if (face && (poseCount === 0 || frameCount % faceStride === 0)) {
       if (message.timestamp > faceTime) faceTime = message.timestamp;
       else faceTime += 1;
       const faceStarted = performance.now();
-      lastFaces = slimFaces(face.detectForVideo(bitmap, faceTime).faceLandmarks);
+      lastFaces = slimFaces(face.detectForVideo(image, faceTime).faceLandmarks);
       const faceMs = performance.now() - faceStarted;
       faceStride = faceMs > 50 ? 2 : 1;
     }
@@ -208,6 +232,8 @@ self.onmessage = async (event: MessageEvent<InitMessage | FrameMessage>) => {
       inferenceMs: performance.now() - started,
       delegate,
       faceReady: face != null,
+      frameWidth: message.width,
+      frameHeight: message.height,
     });
   } catch (error) {
     const messageText = error instanceof Error ? error.message : String(error);
@@ -223,7 +249,12 @@ self.onmessage = async (event: MessageEvent<InitMessage | FrameMessage>) => {
         rebuilding = false;
       }
     }
-  } finally {
-    bitmap.close();
   }
 };
+
+function imageFromPixels(message: FrameMessage): ImageData {
+  if (message.width < 2 || message.height < 2) throw new Error(`frame ${message.width}x${message.height}`);
+  const pixels = new Uint8ClampedArray(message.buffer);
+  if (pixels.length < message.width * message.height * 4) throw new Error("frame short");
+  return new ImageData(pixels, message.width, message.height);
+}

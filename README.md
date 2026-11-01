@@ -113,7 +113,7 @@ Unit tests cover the coach (which way to move, including the mirrored selfie pre
 - iOS and mobile Chrome only expose the camera on HTTPS (or localhost). Stream resolution is whatever `getUserMedia` allows — often 1080p or 4K, not the full still-photo sensor. A still capture from `ImageCapture.takePhoto()` can disagree with the video field of view, so the crop is taken from the same frame the coach saw.
 - Hardware zoom constraints are uneven (mainly iOS 17+) and enlarge by throwing pixels away. This app does not use them. It crops digitally inside a limit, and asks the holder to step closer past that.
 - The level guide needs motion permission. iOS has no vibration API. Voice uses the system speech voices that are installed.
-- Pose and face try the GPU on desktop and fall back to CPU if a frame fails. iPhone and iPad start on CPU. The first load reads a few megabytes of wasm and models from the same origin. A close-up that shows only a face still counts as a person.
+- Pose and face try the GPU on desktop and fall back to CPU if a frame fails. iPhone and iPad start on CPU. Wasm and the `.task` models are served from this site (`/vendor`), not from a CDN. Camera frames are copied as pixels: Safari reports `videoWidth: 0` on an `ImageBitmap`, which made the detector see an empty frame. If the model does not load within 18 seconds, the reason stays on screen. A close-up that shows only a face still counts as a person.
 - The aesthetic ranker is a portrait rule scorer in the spirit of learned crop rankers such as GAIC, not a shipped neural ranking model. A network that large is a poor fit for a first paint on a phone, and the rules are testable.
 - One primary subject. Tap another face to switch. The coach does not direct the person being photographed, only the person holding the phone.
 - No filters, relighting, or beauty retouch. That is deliberate.
@@ -239,7 +239,7 @@ npm run build
 - iOS 和手机 Chrome 只在 HTTPS（或 localhost）上提供相机。`getUserMedia` 的分辨率通常是 1080p 或 4K 这一档，不是传感器的完整静物分辨率。`ImageCapture.takePhoto()` 的视野可能和预览不一致，所以裁切使用的是引导所看到的那一帧。
 - 硬件变焦约束并不普遍（主要是 iOS 17 及以后），而且变焦会丢掉像素。本应用不用它。数字裁切有上限，超过就请拿手机的人走近。
 - 水平校正需要动作传感器权限。iOS 没有振动接口。语音依赖系统里已安装的语音包。
-- 桌面端姿势和人脸先试 GPU，某一帧失败就改用 CPU。iPhone 和 iPad 从 CPU 开始。第一次打开会从同一域名读取数兆的 wasm 和模型。只有脸的特写也算一个人。
+- 桌面端姿势和人脸先试 GPU，某一帧失败就改用 CPU。iPhone 和 iPad 从 CPU 开始。wasm 和 `.task` 模型由本站的 `/vendor` 提供，不走外部 CDN。相机帧按像素拷进识别，因为 Safari 里 `ImageBitmap` 的 `videoWidth` 是 0，检测会把画面看成空的。模型若 18 秒内没有加载完，原因会留在画面上。只有脸的特写也算一个人。
 - 审美排序是一套人像规则打分，思路接近 GAIC 这类「给裁切打分再排序」的方法，但没有附带一个神经网络排序模型。那样的模型太大，不适合手机上的第一次打开，而这套规则可以被测试。
 - 默认只跟一个主体。点另一张脸可以切换。引导只对拿手机的人说话，不指挥被拍的人摆姿势。
 - 没有滤镜、补光或美颜。这是有意为之。

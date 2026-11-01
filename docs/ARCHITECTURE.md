@@ -25,7 +25,8 @@ camera frame
 - Pose: `pose_landmarker_lite` float16 (33 landmarks). This is enough to know shoulders, elbows, wrists, hips, knees, and ankles, and to estimate a head if the face model misses.
 - Face: `face_landmarker` float16. The worker keeps a handful of points (forehead, chin, eyes, nose, cheeks), not all 478. Hair is not a landmark; the skull top is estimated at about 0.55 of the face-mesh height above the forehead point.
 - The wasm files are the ES module build (`vision_wasm_module_internal`). Module workers cannot `importScripts`. The module build assigns `globalThis.ModuleFactory`. MediaPipe clears that factory after creating a task, so the worker imports the loader once, keeps the factory, and restores it before starting the face landmarker. Pose and face therefore get two wasm instances. If the face model fails, pose-only guidance still runs.
-- Desktop tries the GPU delegate first, then CPU. iPhone and iPad start on CPU, because Safari's GPU delegate can accept setup and then throw on every frame. A later GPU failure rebuilds both models on CPU. A face with no body still counts as a subject, and the face landmarker runs on any frame where pose finds nobody. Face inference drops to every other frame when it takes longer than 50 ms. A frame that cannot be copied with `createImageBitmap` is drawn to a canvas first.
+- Desktop tries the GPU delegate first, then CPU. iPhone and iPad start on CPU, because Safari's GPU delegate can accept setup and then throw on every frame. A later GPU failure rebuilds both models on CPU. A face with no body still counts as a subject, and the face landmarker runs on any frame where pose finds nobody. Face inference drops to every other frame when it takes longer than 50 ms.
+- Frames are copied to `ImageData` and posted to the worker. Safari's `ImageBitmap` reports `videoWidth: 0`, and MediaPipe uses that property whenever it exists, so a bitmap is seen as a 0×0 image and both models return nobody. The wasm and `.task` files are copied into `public/vendor` and loaded from the page origin. A load that 404s, leaves the origin, or exceeds 18 seconds stays on screen as 识别模型加载失败 plus the reason.
 - Models and wasm are same-origin (`public/vendor`). They are not fetched from `storage.googleapis.com` at runtime.
 
 The main thread never waits on a backlog. If the worker is busy, the frame is dropped.
@@ -126,7 +127,8 @@ Filters, skin smoothing, relighting, a social feed, and any instruction aimed at
 - 姿势：`pose_landmarker_lite` float16（33 个点）。足以得到肩、肘、腕、髋、膝、踝；人脸模型失败时也可以估出一个头。
 - 人脸：`face_landmarker` float16。Worker 只保留额头、下巴、眼、鼻、脸颊，不传全部 478 个点。头发不是关键点；颅顶按脸网格高度的大约 0.55 倍，加在额头点之上。
 - wasm 用的是 ES module 构建（`vision_wasm_module_internal`）。Module worker 不能 `importScripts`。这个构建会把 `ModuleFactory` 挂到 `globalThis`。MediaPipe 创建完一个任务后会清掉这个工厂，因此 Worker 先导入一次加载器，留下工厂，在启动人脸模型前再放回去。姿势和人脸于是各有一份 wasm 实例。人脸失败时，仍可用姿势做引导。
-- 桌面端先试 GPU，失败再用 CPU。iPhone 和 iPad 一开始就用 CPU，因为 Safari 的 GPU 委托可能创建成功、随后每一帧都抛错。运行中如果 GPU 失败，会把两个模型都重建到 CPU。只有脸、没有身体的特写也算一个人；姿势没找到人的那一帧会跑人脸。人脸推理超过 50 毫秒时改为隔帧。`createImageBitmap` 拷不走画面时，先画到 canvas 再送进 Worker。
+- 桌面端先试 GPU，失败再用 CPU。iPhone 和 iPad 一开始就用 CPU，因为 Safari 的 GPU 委托可能创建成功、随后每一帧都抛错。运行中如果 GPU 失败，会把两个模型都重建到 CPU。只有脸、没有身体的特写也算一个人；姿势没找到人的那一帧会跑人脸。人脸推理超过 50 毫秒时改为隔帧。
+- 画面先画成 `ImageData` 再送进 Worker。Safari 的 `ImageBitmap.videoWidth` 是 0，而 MediaPipe 只要这个属性存在就用它，于是把整帧当成 0×0，两个模型都返回没有人。wasm 和 `.task` 复制到 `public/vendor`，只从页面自己的域名加载。加载 404、跑到别的域名，或超过 18 秒，画面上会一直显示「识别模型加载失败」和原因。
 - 模型和 wasm 都在同一域名（`public/vendor`），运行时不向 `storage.googleapis.com` 请求。
 
 主线程不堆积帧。Worker 正忙时，这一帧直接丢掉。

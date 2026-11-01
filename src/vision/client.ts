@@ -18,7 +18,7 @@ export class VisionClient {
   constructor() {
     this.worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
     this.worker.onmessage = (event: MessageEvent) => {
-      const data = event.data as { type: string; message?: string; faceError?: string; faces?: RawFace[]; poses?: RawPose[]; inferenceMs?: number; pose?: boolean; face?: boolean; faceReady?: boolean; delegate?: string };
+      const data = event.data as { type: string; message?: string; faceError?: string; faces?: RawFace[]; poses?: RawPose[]; inferenceMs?: number; pose?: boolean; face?: boolean; faceReady?: boolean; delegate?: string; frameWidth?: number; frameHeight?: number };
       if (data.type === "ready") {
         this.ready = true;
         this.faceReady = Boolean(data.face);
@@ -31,6 +31,8 @@ export class VisionClient {
         this.clearBusy();
         if (data.delegate) this.delegate = data.delegate;
         if (typeof data.faceReady === "boolean") this.faceReady = data.faceReady;
+        this.frameWidth = data.frameWidth ?? 0;
+        this.frameHeight = data.frameHeight ?? 0;
         this.onResult({
           faces: data.faces ?? [],
           poses: data.poses ?? [],
@@ -52,19 +54,22 @@ export class VisionClient {
   }
 
   delegate = "";
+  frameWidth = 0;
+  frameHeight = 0;
 
   init(paths: { wasmPath: string; poseModel: string; faceModel: string; cpuOnly?: boolean }): void {
     this.worker.postMessage({ type: "init", ...paths });
   }
 
-  send(bitmap: ImageBitmap, timestamp: number): void {
-    if (this.busy || !this.ready) {
-      bitmap.close();
-      return;
-    }
+  send(frame: { width: number; height: number; data: Uint8ClampedArray }, timestamp: number): void {
+    if (this.busy || !this.ready) return;
+    const buffer = frame.data.buffer.slice(frame.data.byteOffset, frame.data.byteOffset + frame.data.byteLength);
     this.busy = true;
     this.timer = window.setTimeout(() => this.clearBusy(), 1500);
-    this.worker.postMessage({ type: "frame", bitmap, timestamp }, [bitmap]);
+    this.worker.postMessage(
+      { type: "frame", width: frame.width, height: frame.height, buffer, timestamp },
+      [buffer],
+    );
   }
 
   close(): void {

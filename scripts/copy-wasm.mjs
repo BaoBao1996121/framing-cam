@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -17,5 +17,14 @@ const files = [
 mkdirSync(dst, { recursive: true });
 for (const name of files) {
   copyFileSync(join(src, name), join(dst, name));
+}
+// The module loader asks for this name when locateFile is not installed yet.
+copyFileSync(join(dst, "vision_wasm_module_internal.wasm"), join(dst, "vision_wasm_module_raw_internal.wasm"));
+for (const name of files) {
+  if (!name.endsWith(".js")) continue;
+  const text = readFileSync(join(dst, name), "utf8");
+  if (/jsdelivr|storage\.googleapis|unpkg/.test(text)) {
+    throw new Error(`${name} references an external CDN`);
+  }
 }
 console.log("copied MediaPipe wasm into public/vendor/wasm");

@@ -1,4 +1,5 @@
-import { attachCamera, grabInferenceBitmap, stopStream, type Facing } from "../camera/stream";
+import { assertSameOrigin } from "../camera/pixels";
+import { attachCamera, grabInferencePixels, stopStream, type Facing } from "../camera/stream";
 import { ASPECTS, ASPECT_IDS, type AspectId, type FramePlan, type GuidanceCode, type LlmSuggestion, type Rect, type Subject } from "../composition/types";
 import { frameAroundTarget } from "../composition/geometry";
 import { planFrame, stabilizeGuidance, type GuidanceMemory } from "../composition/plan";
@@ -113,6 +114,8 @@ class CameraApp {
   private poseCount = 0;
   private detectTimes: number[] = [];
   private lastDetectError = "";
+  private visionFaults = 0;
+  private cameraOpenedAt = 0;
   private recognition: SpeechRec | null = null;
   private shot: Shot | null = null;
   private reviewUrl = "";
@@ -140,6 +143,54 @@ class CameraApp {
     }
     const demo = params.get("demo");
     if (demo === "1" || demo === "auto") this.openDemo(demo === "auto");
+    if (params.has("probe")) this.exposeProbe();
+  }
+
+  private probeHold = false;
+  private probeSize: { width: number; height: number } | null = null;
+  private probeWait: ((result: { faces: number; poses: number; frameWidth: number; frameHeight: number }) => void) | null = null;
+
+  private exposeProbe(): void {
+    const host = window as unknown as {
+      __detect?: (dataUrl: string) => Promise<{ faces: number; poses: number; frameWidth: number; frameHeight: number }>;
+      __bitmapSize?: () => Promise<{ videoWidth: number; width: number }>;
+    };
+    host.__bitmapSize = async () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 32;
+      canvas.height = 24;
+      const context = canvas.getContext("2d");
+      if (!context) return { videoWidth: -1, width: 0 };
+      context.fillRect(0, 0, 32, 24);
+      const bitmap = await createImageBitmap(canvas);
+      const videoWidth = "videoWidth" in bitmap ? Number((bitmap as unknown as { videoWidth: number }).videoWidth) : -1;
+      const width = bitmap.width;
+      bitmap.close();
+      return { videoWidth, width };
+    };
+    host.__detect = (dataUrl: string) =>
+      new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => {
+          void this.ensureVision().then(() => {
+            if (!this.vision?.ready) {
+              reject(new Error(document.getElementById("vision-status")?.textContent || "not ready"));
+              return;
+            }
+            const pixels = grabInferencePixels(image, image.naturalWidth, image.naturalHeight);
+            this.probeHold = true;
+            this.probeSize = { width: pixels.width, height: pixels.height };
+            this.probeWait = (result) => {
+              this.probeHold = false;
+              this.probeSize = null;
+              resolve(result);
+            };
+            this.vision.send(pixels, performance.now());
+          });
+        };
+        image.onerror = () => reject(new Error("image"));
+        image.src = dataUrl;
+      });
   }
 
   private bind(): void {
@@ -296,11 +347,8 @@ class CameraApp {
     try {
       await this.motion.request();
       unlockAudio();
-      try {
-        await this.bootVision();
-      } catch {
-        this.showToast(this.copy.modelError);
-      }
+      await this.ensureVision();
+      this.cameraOpenedAt = performance.now();
       this.stream = await attachCamera(this.video, this.facing);
       this.mode = "camera";
       this.video.hidden = false;
@@ -337,9 +385,7 @@ class CameraApp {
     this.resetTracking();
     this.show("live");
     this.startLoop();
-    void this.bootVision().catch(() => {
-      /* The drawn demo keeps running. The debug panel shows the load error. */
-    });
+    void this.ensureVision();
   }
 
   private async flip(): Promise<void> {
@@ -398,13 +444,16 @@ class CameraApp {
       const subject = subjectFromDemo(this.demo);
       this.subjects = [subject];
       this.steady.pushLandmark(time, subject.eye.x, subject.eye.y);
-      if (this.vision?.ready && time - this.lastGrab > 220) {
+      if (this.vision?.ready && !this.probeHold && time - this.lastGrab > 220) {
         this.lastGrab = time;
         void this.sendDemoFrame(time);
       }
     } else if (this.video.readyState >= 2 && time - this.lastGrab > 66) {
       this.lastGrab = time;
       void this.sendFrame(time);
+      if (this.video.videoWidth < 2 && this.cameraOpenedAt && time - this.cameraOpenedAt > 4000) {
+        this.setVisionStatus(this.copy.frameFail);
+      }
     }
     this.steady.pushAccel(time, this.motion.linearG);
     this.render(time);
@@ -413,24 +462,20 @@ class CameraApp {
   private async sendDemoFrame(time: number): Promise<void> {
     if (!this.vision?.ready) return;
     try {
-      const bitmap = await createImageBitmap(this.demoCanvas, {
-        resizeWidth: 540,
-        resizeHeight: 960,
-        resizeQuality: "low",
-      });
-      this.vision.send(bitmap, time);
-    } catch {
-      /* The next frame will try again. */
+      const pixels = grabInferencePixels(this.demoCanvas, this.demoCanvas.width, this.demoCanvas.height);
+      this.vision.send(pixels, time);
+    } catch (error) {
+      this.noteVisionFailure(error instanceof Error ? error.message : "frame", true);
     }
   }
 
   private async sendFrame(time: number): Promise<void> {
-    if (!this.vision?.ready || this.video.videoWidth < 2) return;
+    if (!this.vision?.ready || this.video.videoWidth < 2 || this.video.videoHeight < 2) return;
     try {
-      const bitmap = await grabInferenceBitmap(this.video);
-      this.vision.send(bitmap, time);
-    } catch {
-      /* The next frame will try again. */
+      const pixels = grabInferencePixels(this.video, this.video.videoWidth, this.video.videoHeight);
+      this.vision.send(pixels, time);
+    } catch (error) {
+      this.noteVisionFailure(error instanceof Error ? error.message : "frame", true);
     }
   }
 
@@ -440,6 +485,16 @@ class CameraApp {
     const now = performance.now();
     this.detectTimes.push(now);
     this.detectTimes = this.detectTimes.filter((stamp) => now - stamp < 1000);
+    if (this.probeWait) {
+      const frameWidth = this.vision?.frameWidth ?? 0;
+      const frameHeight = this.vision?.frameHeight ?? 0;
+      const matches = !this.probeSize || (frameWidth === this.probeSize.width && frameHeight === this.probeSize.height);
+      if (matches) {
+        const resolve = this.probeWait;
+        this.probeWait = null;
+        resolve({ faces: perception.faces.length, poses: perception.poses.length, frameWidth, frameHeight });
+      }
+    }
     if (this.mode === "demo") return;
     const found = detectSubjects(perception.faces, perception.poses);
     const assigned = assignIds(this.tracks, found, this.ids);
@@ -798,6 +853,7 @@ class CameraApp {
       `face ${this.vision?.faceReady ? "ok" : "no"}  ${fps} fps`,
       `faces ${this.faceCount}  poses ${this.poseCount}`,
       `people ${this.subjects.length}`,
+      `video ${this.video.videoWidth}x${this.video.videoHeight} frame ${this.vision?.frameWidth ?? 0}x${this.vision?.frameHeight ?? 0}`,
       this.lastDetectError ? `err ${this.lastDetectError.slice(0, 80)}` : "err none",
       this.vision?.faceError ? `face ${this.vision.faceError.slice(0, 80)}` : "",
     ].filter(Boolean).join("\n");
@@ -952,6 +1008,44 @@ class CameraApp {
     if (screen === "live") this.resize();
   }
 
+  private ensureVision(): Promise<void> {
+    return this.bootVision().then(
+      () => {
+        this.visionFaults = 0;
+        this.setVisionStatus("");
+      },
+      (error: unknown) => {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.noteVisionFailure(reason, false);
+      },
+    );
+  }
+
+  private noteVisionFailure(message: string, ready: boolean): void {
+    this.lastDetectError = message;
+    this.visionFaults += 1;
+    if (!ready || this.visionFaults >= 3) {
+      const label = ready ? this.copy.detectFail : this.copy.modelFail;
+      this.setVisionStatus(`${label}：${message}`);
+    }
+  }
+
+  private setVisionStatus(message: string): void {
+    const status = document.getElementById("vision-status");
+    if (!status) return;
+    status.hidden = !message;
+    status.textContent = message;
+  }
+
+  private async probeAssets(urls: string[]): Promise<void> {
+    for (const url of urls) {
+      const absolute = assertSameOrigin(window.location.href, url);
+      const response = await fetch(absolute.href, { headers: { Range: "bytes=0-16" } });
+      if (!response.ok) throw new Error(`${response.status} ${absolute.pathname}`);
+      await response.body?.cancel();
+    }
+  }
+
   private bootVision(): Promise<void> {
     if (this.vision?.ready) return Promise.resolve();
     if (this.visionBoot) return this.visionBoot;
@@ -959,15 +1053,25 @@ class CameraApp {
       const client = new VisionClient();
       const timer = window.setTimeout(() => {
         client.close();
-        reject(new Error("timeout"));
-      }, 25000);
+        reject(new Error(this.copy.modelTimeout));
+      }, 18000);
+      const paths = {
+        wasmPath: vendorUrl("vendor/wasm"),
+        poseModel: vendorUrl("vendor/models/pose_landmarker_lite.task"),
+        faceModel: vendorUrl("vendor/models/face_landmarker.task"),
+        cpuOnly: this.preferCpu(),
+      };
       client.onReady = () => {
         window.clearTimeout(timer);
         this.vision = client;
-        client.onResult = (perception) => this.onPerception(perception);
-        client.onError = (message) => {
-          this.lastDetectError = message;
+        client.onResult = (perception) => {
+          if (this.visionFaults > 0) {
+            this.visionFaults = 0;
+            this.setVisionStatus("");
+          }
+          this.onPerception(perception);
         };
+        client.onError = (message) => this.noteVisionFailure(message, true);
         resolve();
       };
       client.onError = (message) => {
@@ -977,12 +1081,19 @@ class CameraApp {
         client.close();
         reject(new Error(message));
       };
-      client.init({
-        wasmPath: vendorUrl("vendor/wasm"),
-        poseModel: vendorUrl("vendor/models/pose_landmarker_lite.task"),
-        faceModel: vendorUrl("vendor/models/face_landmarker.task"),
-        cpuOnly: this.preferCpu(),
-      });
+      void this.probeAssets([
+        `${paths.wasmPath}/vision_wasm_module_internal.js`,
+        `${paths.wasmPath}/vision_wasm_module_internal.wasm`,
+        `${paths.wasmPath}/vision_wasm_module_raw_internal.wasm`,
+        paths.poseModel,
+        paths.faceModel,
+      ])
+        .then(() => client.init(paths))
+        .catch((error: unknown) => {
+          window.clearTimeout(timer);
+          client.close();
+          reject(error instanceof Error ? error : new Error(String(error)));
+        });
     });
     this.visionBoot = pending.then(
       () => undefined,

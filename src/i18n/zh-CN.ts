@@ -13,11 +13,15 @@ export const zhCN = {
   close: "关闭",
   credit:
     "这个项目受 Doka 相机「实时构图引导」的产品思路启发，是独立实现的开源网页相机。它与 Doka 及其开发者没有关联，也不复制对方的界面、模型或素材。",
-  how: "手机用姿势和人脸看人在哪。只有脸的特写也算。画面用两条人影和箭头引导，重合后自动拍。iPhone 上检测走 CPU。",
+  how: "手机用姿势和人脸看人在哪。只有脸的特写也算。模型和 wasm 都在这个网站上，不从外部下载。加载失败时画面上会写出原因。",
   loading: "正在准备构图模型…",
   cameraError: "没有打开相机。请允许摄像头，并确认页面是 HTTPS。",
   insecure: "手机浏览器需要 HTTPS 才能使用相机。请用 npm run dev:https，或打开已部署的地址。",
   modelError: "构图模型没有加载成功。可以先看演示，或刷新重试。",
+  modelFail: "识别模型加载失败",
+  modelTimeout: "超时",
+  detectFail: "识别失败",
+  frameFail: "画面尺寸是 0，识别拿不到帧",
   retry: "重试",
   promptLive: "构图提示",
   guidance: {

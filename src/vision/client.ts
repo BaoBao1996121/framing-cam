@@ -18,16 +18,19 @@ export class VisionClient {
   constructor() {
     this.worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
     this.worker.onmessage = (event: MessageEvent) => {
-      const data = event.data as { type: string; message?: string; faceError?: string; faces?: RawFace[]; poses?: RawPose[]; inferenceMs?: number; pose?: boolean; face?: boolean };
+      const data = event.data as { type: string; message?: string; faceError?: string; faces?: RawFace[]; poses?: RawPose[]; inferenceMs?: number; pose?: boolean; face?: boolean; faceReady?: boolean; delegate?: string };
       if (data.type === "ready") {
         this.ready = true;
         this.faceReady = Boolean(data.face);
         this.faceError = data.faceError || "";
+        if (data.delegate) this.delegate = data.delegate;
         this.onReady({ pose: Boolean(data.pose), face: this.faceReady });
         return;
       }
       if (data.type === "result") {
         this.clearBusy();
+        if (data.delegate) this.delegate = data.delegate;
+        if (typeof data.faceReady === "boolean") this.faceReady = data.faceReady;
         this.onResult({
           faces: data.faces ?? [],
           poses: data.poses ?? [],
@@ -48,7 +51,9 @@ export class VisionClient {
     };
   }
 
-  init(paths: { wasmPath: string; poseModel: string; faceModel: string }): void {
+  delegate = "";
+
+  init(paths: { wasmPath: string; poseModel: string; faceModel: string; cpuOnly?: boolean }): void {
     this.worker.postMessage({ type: "init", ...paths });
   }
 

@@ -42,6 +42,12 @@ export async function grabInferenceBitmap(video: HTMLVideoElement): Promise<Imag
   try {
     return await createImageBitmap(video, { resizeWidth: width, resizeHeight: height, resizeQuality: "low" });
   } catch {
-    return createImageBitmap(video);
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("frame");
+    context.drawImage(video, 0, 0, width, height);
+    return createImageBitmap(canvas);
   }
 }

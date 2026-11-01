@@ -19,14 +19,16 @@ import { MotionLevel } from "../sensors/listen";
 import { canvasFromVideo, canvasToJpeg, downloadBlob, pulse, renderCrop, shutterClick, snapshotDataUrl, speakPrompt, unlockAudio } from "./capture";
 import { zipStore } from "../export/zip";
 import { coverTransform, screenToImage } from "../composition/geometry";
-import { drawOverlay } from "./overlay";
+import { drawOverlay, strokeFigure } from "./overlay";
 import { vendorUrl, VisionClient } from "../vision/client";
 
 type SpeechRec = {
   lang: string;
   start: () => void;
+  stop: () => void;
   onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
   onerror: (() => void) | null;
+  onend: (() => void) | null;
 };
 
 type Mode = "camera" | "demo";
@@ -57,7 +59,6 @@ class CameraApp {
   private readonly overlay = must<HTMLCanvasElement>("overlay");
   private readonly overlayCtx = this.overlay.getContext("2d");
   private readonly prompt = must<HTMLElement>("prompt");
-  private readonly hint = must<HTMLElement>("hint");
   private readonly toast = must<HTMLElement>("toast");
   private readonly shutterButton = must<HTMLButtonElement>("shutter");
   private readonly about = must<HTMLDialogElement>("about");
@@ -107,6 +108,12 @@ class CameraApp {
   private lastSnap = 0;
   private lastQuality = 0;
   private analyzing = false;
+  private didAutoPlan = false;
+  private faceCount = 0;
+  private poseCount = 0;
+  private detectTimes: number[] = [];
+  private lastDetectError = "";
+  private recognition: SpeechRec | null = null;
   private shot: Shot | null = null;
   private reviewUrl = "";
 
@@ -146,17 +153,6 @@ class CameraApp {
     must<HTMLButtonElement>("open-about").addEventListener("click", () => this.about.showModal());
     must<HTMLButtonElement>("about-close").addEventListener("click", () => this.about.close());
     must<HTMLButtonElement>("flip").addEventListener("click", () => void this.flip());
-    must<HTMLButtonElement>("voice").addEventListener("click", () => {
-      this.voice = !this.voice;
-      unlockAudio();
-      this.applyToggles();
-    });
-    must<HTMLButtonElement>("cloud").addEventListener("click", () => {
-      if (!this.cloudOk) return;
-      this.cloudWanted = !this.cloudWanted;
-      if (!this.cloudWanted) this.llm = null;
-      this.applyToggles();
-    });
     must<HTMLButtonElement>("auto").addEventListener("click", () => {
       this.auto = !this.auto;
       this.autoShutter = new AutoShutter();
@@ -167,7 +163,11 @@ class CameraApp {
       event.preventDefault();
       void this.analyze();
     });
-    must<HTMLButtonElement>("mic").addEventListener("click", () => this.listen());
+    this.bindMic();
+    must<HTMLButtonElement>("debug-toggle").addEventListener("click", () => {
+      const panel = document.getElementById("debug");
+      if (panel) panel.hidden = !panel.hidden;
+    });
     this.shutterButton.addEventListener("click", () => this.capture());
     must<HTMLButtonElement>("retake").addEventListener("click", () => this.show("live"));
     must<HTMLButtonElement>("save").addEventListener("click", () => void this.save(false));
@@ -282,13 +282,7 @@ class CameraApp {
   }
 
   private applyToggles(): void {
-    press("voice", this.voice, this.copy.voice);
     press("auto", this.auto, this.copy.auto);
-    const cloud = must<HTMLButtonElement>("cloud");
-    cloud.disabled = !this.cloudOk;
-    cloud.setAttribute("aria-pressed", String(this.cloudOk && this.cloudWanted));
-    cloud.textContent = this.copy.cloud;
-    cloud.title = this.cloudOk ? this.copy.cloud : this.copy.cloudOff;
   }
 
   private async openCamera(): Promise<void> {
@@ -343,6 +337,9 @@ class CameraApp {
     this.resetTracking();
     this.show("live");
     this.startLoop();
+    void this.bootVision().catch(() => {
+      /* The drawn demo keeps running. The debug panel shows the load error. */
+    });
   }
 
   private async flip(): Promise<void> {
@@ -368,6 +365,7 @@ class CameraApp {
     this.plans = [];
     this.planIndex = 0;
     this.anchorBox = null;
+    this.didAutoPlan = false;
     this.snaps = [];
     this.renderPlanCards();
     this.steady.reset();
@@ -400,6 +398,10 @@ class CameraApp {
       const subject = subjectFromDemo(this.demo);
       this.subjects = [subject];
       this.steady.pushLandmark(time, subject.eye.x, subject.eye.y);
+      if (this.vision?.ready && time - this.lastGrab > 220) {
+        this.lastGrab = time;
+        void this.sendDemoFrame(time);
+      }
     } else if (this.video.readyState >= 2 && time - this.lastGrab > 66) {
       this.lastGrab = time;
       void this.sendFrame(time);
@@ -407,6 +409,20 @@ class CameraApp {
     this.steady.pushAccel(time, this.motion.linearG);
     this.render(time);
   };
+
+  private async sendDemoFrame(time: number): Promise<void> {
+    if (!this.vision?.ready) return;
+    try {
+      const bitmap = await createImageBitmap(this.demoCanvas, {
+        resizeWidth: 540,
+        resizeHeight: 960,
+        resizeQuality: "low",
+      });
+      this.vision.send(bitmap, time);
+    } catch {
+      /* The next frame will try again. */
+    }
+  }
 
   private async sendFrame(time: number): Promise<void> {
     if (!this.vision?.ready || this.video.videoWidth < 2) return;
@@ -419,6 +435,12 @@ class CameraApp {
   }
 
   private onPerception(perception: { faces: Parameters<typeof detectSubjects>[0]; poses: Parameters<typeof detectSubjects>[1] }): void {
+    this.faceCount = perception.faces.length;
+    this.poseCount = perception.poses.length;
+    const now = performance.now();
+    this.detectTimes.push(now);
+    this.detectTimes = this.detectTimes.filter((stamp) => now - stamp < 1000);
+    if (this.mode === "demo") return;
     const found = detectSubjects(perception.faces, perception.poses);
     const assigned = assignIds(this.tracks, found, this.ids);
     this.tracks = assigned.tracks;
@@ -453,21 +475,74 @@ class CameraApp {
     }
   }
 
-  private listen(): void {
+  private bindMic(): void {
+    const mic = must<HTMLButtonElement>("mic");
+    const finish = () => this.endListen();
+    mic.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      mic.setPointerCapture?.(event.pointerId);
+      this.beginListen();
+    });
+    mic.addEventListener("pointerup", finish);
+    mic.addEventListener("pointercancel", finish);
+  }
+
+  private speechCtor(): (new () => SpeechRec) | null {
+    const host = window as unknown as { SpeechRecognition?: new () => SpeechRec; webkitSpeechRecognition?: new () => SpeechRec };
+    return host.SpeechRecognition || host.webkitSpeechRecognition || null;
+  }
+
+  private beginListen(): void {
     const input = document.getElementById("style-input");
-    const Ctor = (window as unknown as { SpeechRecognition?: new () => SpeechRec; webkitSpeechRecognition?: new () => SpeechRec }).SpeechRecognition
-      || (window as unknown as { webkitSpeechRecognition?: new () => SpeechRec }).webkitSpeechRecognition;
+    const Ctor = this.speechCtor();
+    const mic = document.getElementById("mic");
     if (!Ctor || !(input instanceof HTMLInputElement)) {
+      input instanceof HTMLInputElement && input.focus();
       this.showToast(this.copy.noSpeech);
       return;
     }
+    this.setFlow(this.copy.listening);
+    mic?.classList.add("listening");
     const recognition = new Ctor();
     recognition.lang = this.locale === "en" ? "en-US" : "zh-CN";
     recognition.onresult = (event) => {
-      input.value = event.results[0][0].transcript;
+      const said = event.results[0]?.[0]?.transcript ?? "";
+      if (said) input.value = said;
     };
-    recognition.onerror = () => this.showToast(this.copy.noSpeech);
-    recognition.start();
+    recognition.onerror = () => this.setFlow("");
+    recognition.onend = () => {
+      mic?.classList.remove("listening");
+      if (input.value.trim()) void this.analyze();
+      else this.setFlow("");
+    };
+    this.recognition = recognition;
+    try {
+      recognition.start();
+    } catch {
+      this.showToast(this.copy.noSpeech);
+      this.setFlow("");
+    }
+  }
+
+  private endListen(): void {
+    document.getElementById("mic")?.classList.remove("listening");
+    try {
+      this.recognition?.stop();
+    } catch {
+      /* already stopped by silence */
+    }
+  }
+
+  private setFlow(label: string): void {
+    const flow = document.getElementById("flow");
+    if (!flow) return;
+    flow.hidden = !label;
+    flow.textContent = label;
+  }
+
+  private preferCpu(): boolean {
+    const ua = navigator.userAgent;
+    return /iP(hone|ad|od)/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   }
 
   private zoomRange(): { min: number; max: number; current: number } {
@@ -480,6 +555,7 @@ class CameraApp {
   private async analyze(): Promise<void> {
     if (this.analyzing) return;
     this.analyzing = true;
+    this.setFlow(this.copy.analyzing);
     const input = document.getElementById("style-input");
     const style = input instanceof HTMLInputElement && input.value.trim() ? input.value.trim() : "自然";
     const subject = selectSubject(this.subjects, this.selectedId);
@@ -517,6 +593,7 @@ class CameraApp {
     this.missingSince = null;
     this.countdownEnds = 0;
     this.renderPlanCards();
+    this.setFlow("");
     this.analyzing = false;
   }
 
@@ -530,11 +607,19 @@ class CameraApp {
       button.type = "button";
       button.className = "plan-card";
       button.setAttribute("aria-pressed", String(index === this.planIndex));
+      const canvas = document.createElement("canvas");
+      canvas.width = 112;
+      canvas.height = 148;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.fillStyle = "#241f1a";
+        ctx.fillRect(0, 0, 112, 148);
+        const box = plan.targetBox;
+        strokeFigure(ctx, { x: box.x * 112, y: box.y * 148, w: box.w * 112, h: box.h * 148 }, "#f6f1e7", 3, []);
+      }
       const title = document.createElement("strong");
-      title.textContent = plan.title;
-      const detail = document.createElement("span");
-      detail.textContent = `${plan.holderDirection} · ${plan.poseTip}`;
-      button.append(title, detail);
+      title.textContent = plan.title.slice(0, 6);
+      button.append(canvas, title);
       button.addEventListener("click", () => {
         this.planIndex = index;
         this.shotGuide = initialGuide(performance.now());
@@ -610,8 +695,17 @@ class CameraApp {
       mirror: this.mirror,
       llm: this.cloudWanted && this.cloudOk ? this.llm : null,
     });
-    const active = this.plans[this.planIndex];
     const region = subject ? subjectRegion(subject) : null;
+    if (!this.didAutoPlan && region && this.plans.length === 0 && this.screen === "live" && !this.analyzing) {
+      this.didAutoPlan = true;
+      const typed = document.getElementById("style-input");
+      const style = typed instanceof HTMLInputElement && typed.value.trim() ? typed.value.trim() : "自然";
+      this.plans = fallbackPlans(style, region);
+      this.anchorBox = region;
+      this.shotGuide = initialGuide(time);
+      this.renderPlanCards();
+    }
+    const active = this.plans[this.planIndex];
     const roll = this.mode === "demo" ? this.demo.roll : this.motion.roll();
     let guideTarget: Rect | null = null;
     let guideAligned = false;
@@ -633,7 +727,7 @@ class CameraApp {
       bar = step.score;
       readyNow = step.hint === "ready" && !stale;
       promptCode = step.hint === "hold" ? "steady" : step.hint;
-      promptText = stale ? this.copy.stale : this.copy.guidance[promptCode];
+      promptText = stale ? this.copy.stale : this.copy.short[promptCode];
       this.rawGuidance = promptCode;
       if (this.screen === "live" && this.auto && readyNow) {
         if (this.countdownMs > 0) {
@@ -653,7 +747,7 @@ class CameraApp {
       const stable = stabilizeGuidance(this.guidanceMemory, plan.guidance);
       this.guidanceMemory = stable.memory;
       promptCode = stable.code;
-      promptText = this.copy.guidance[stable.code];
+      promptText = this.copy.short[stable.code];
       if (this.screen === "live") {
         const fire = this.autoShutter.update(plan.ready);
         if (fire && this.auto) this.capture();
@@ -662,11 +756,8 @@ class CameraApp {
     const stableCode = promptCode;
     this.prompt.textContent = promptText;
     this.prompt.dataset.tone = readyNow ? "ready" : promptCode === "closer" || promptCode === "back" ? "warn" : "move";
-    const hints: string[] = [];
-    if (active) hints.push(active.poseTip);
-    if (this.subjects.length > 1) hints.push(this.copy.several);
-    if (window.innerWidth > window.innerHeight * 1.08) hints.push(this.copy.rotateHint);
-    this.hint.textContent = hints.filter(Boolean).join(" · ");
+    const scorebar = document.getElementById("scorebar");
+    if (scorebar) scorebar.dataset.tone = readyNow ? "ready" : "move";
     this.shutterButton.classList.toggle("ready", readyNow);
     this.shutterButton.style.setProperty("--align", bar.toFixed(3));
     const fill = document.getElementById("scorefill");
@@ -681,15 +772,35 @@ class CameraApp {
       subjects: this.subjects,
       roll,
       guideTarget,
+      guideSubject: region,
       guideAligned,
+      guideHint: promptCode,
     });
     if (this.voice && stableCode !== this.spokenCode) {
       this.spokenCode = stableCode;
       speakPrompt(promptText, this.locale);
     }
-    if (readyNow && !this.wasReady) pulse(24);
+    if (readyNow && !this.wasReady) {
+      pulse(28);
+      if (!this.auto) shutterClick();
+    }
     this.wasReady = readyNow;
     document.body.dataset.guidance = promptCode;
+    this.paintDebug();
+  }
+
+  private paintDebug(): void {
+    const panel = document.getElementById("debug");
+    if (!panel || panel.hidden) return;
+    const fps = this.detectTimes.length;
+    panel.textContent = [
+      `detector ${this.vision?.ready ? "ok" : "off"} ${this.vision?.delegate || "—"}`,
+      `face ${this.vision?.faceReady ? "ok" : "no"}  ${fps} fps`,
+      `faces ${this.faceCount}  poses ${this.poseCount}`,
+      `people ${this.subjects.length}`,
+      this.lastDetectError ? `err ${this.lastDetectError.slice(0, 80)}` : "err none",
+      this.vision?.faceError ? `face ${this.vision.faceError.slice(0, 80)}` : "",
+    ].filter(Boolean).join("\n");
   }
 
   private capture(): void {
@@ -754,11 +865,9 @@ class CameraApp {
         this.reviewUrl = URL.createObjectURL(blob);
         const image = must<HTMLImageElement>("review-img");
         image.src = this.reviewUrl;
-        const note = this.shot?.shotPlan ? [this.shot.shotPlan.title, this.shot.shotPlan.holderDirection] : [this.copy.framing[plan.framing]];
+        const note = this.shot?.shotPlan ? [this.shot.shotPlan.title] : [this.copy.framing[plan.framing]];
         if (!this.shot?.subject) note.unshift(this.copy.noSubjectSave);
-        else if (plan.quality === "low") note.push(this.copy.qualityLow);
-        else if (plan.quality === "ok") note.push(this.copy.qualityOk);
-        if (plan.llmReasoning) note.push(plan.llmReasoning);
+        else if (!this.shot.shotPlan && plan.quality === "low") note.push(this.copy.qualityLow);
         image.alt = note.join(" ");
         text("review-note", note.join(" "));
       })
@@ -856,10 +965,13 @@ class CameraApp {
         window.clearTimeout(timer);
         this.vision = client;
         client.onResult = (perception) => this.onPerception(perception);
-        client.onError = () => this.showToast(this.copy.modelError);
+        client.onError = (message) => {
+          this.lastDetectError = message;
+        };
         resolve();
       };
       client.onError = (message) => {
+        this.lastDetectError = message;
         if (this.vision?.ready) return;
         window.clearTimeout(timer);
         client.close();
@@ -869,6 +981,7 @@ class CameraApp {
         wasmPath: vendorUrl("vendor/wasm"),
         poseModel: vendorUrl("vendor/models/pose_landmarker_lite.task"),
         faceModel: vendorUrl("vendor/models/face_landmarker.task"),
+        cpuOnly: this.preferCpu(),
       });
     });
     this.visionBoot = pending.then(

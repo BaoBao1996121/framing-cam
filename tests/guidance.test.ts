@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { detectSubjects, subjectFromFaceAndPose, subjectRegion, type RawFace } from "../src/composition/subject";
 import { initialGuide, measure, stepGuide, type GuideMemory } from "../src/guidance/machine";
 import { compositionScore, smoothScore } from "../src/guidance/quality";
 import { laplacianVariance, pickSharpest } from "../src/guidance/sharpness";
@@ -58,6 +59,26 @@ describe("guidance state machine", () => {
   it("levels the phone before nudging position", () => {
     const step = stepGuide(initialGuide(0), { now: 0, subject: target, target, rollDeg: 8, steady: true });
     expect(step.hint).toBe("raiseRight");
+  });
+});
+
+describe("face-only close-ups", () => {
+  it("counts a face with no body as a subject", () => {
+    const face: RawFace = {
+      forehead: { x: 0.5, y: 0.22 },
+      chin: { x: 0.5, y: 0.48 },
+      leftEye: { x: 0.42, y: 0.3 },
+      rightEye: { x: 0.58, y: 0.3 },
+      nose: { x: 0.5, y: 0.36 },
+      leftCheek: { x: 0.36, y: 0.36 },
+      rightCheek: { x: 0.64, y: 0.36 },
+    };
+    const subject = subjectFromFaceAndPose(face, null);
+    expect(subject).not.toBeNull();
+    expect(detectSubjects([face], [])).toHaveLength(1);
+    const box = subjectRegion({ ...subject!, id: "face" });
+    expect(box.h).toBeGreaterThan(0.2);
+    expect(box.w).toBeGreaterThan(0.15);
   });
 });
 

@@ -253,17 +253,16 @@ video.mirror, canvas.preview.mirror { transform: scaleX(-1); }
 #prompt {
   position: absolute;
   left: 50%;
-  bottom: calc(148px + env(safe-area-inset-bottom));
+  bottom: calc(118px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
   margin: 0;
-  width: max-content;
-  max-width: calc(100% - 36px);
-  font-family: var(--serif);
-  font-size: clamp(30px, 7.4vw, 48px);
-  line-height: 1.08;
-  letter-spacing: 0.01em;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(22, 19, 15, 0.45);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
   text-align: center;
-  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.55);
   pointer-events: none;
 }
 
@@ -328,6 +327,7 @@ video.mirror, canvas.preview.mirror { transform: scaleX(-1); }
 }
 
 #shutter.ready .shutter-core { background: var(--ready); }
+#shutter.ready .align-ring circle { stroke: var(--ready); }
 
 .align-ring {
   position: absolute;
@@ -349,7 +349,7 @@ video.mirror, canvas.preview.mirror { transform: scaleX(-1); }
   top: 0;
   left: 0;
   right: 0;
-  height: 4px;
+  height: 6px;
   z-index: 5;
   background: rgba(246, 241, 231, 0.16);
 }
@@ -358,8 +358,11 @@ video.mirror, canvas.preview.mirror { transform: scaleX(-1); }
   display: block;
   height: 100%;
   width: 0;
-  background: var(--ready);
+  background: #f0a35e;
+  transition: width 0.12s linear, background 0.2s linear;
 }
+
+.scorebar[data-tone="ready"] #scorefill { background: var(--ready); }
 
 .style-bar {
   position: absolute;
@@ -406,10 +409,10 @@ video.mirror, canvas.preview.mirror { transform: scaleX(-1); }
 
 .plan-card {
   scroll-snap-align: center;
-  flex: 0 0 58%;
-  text-align: left;
+  flex: 0 0 76px;
+  text-align: center;
   border-radius: 16px;
-  padding: 10px 12px;
+  padding: 6px;
   background: rgba(22, 19, 15, 0.62);
   color: var(--ivory);
   backdrop-filter: blur(12px);
@@ -418,9 +421,78 @@ video.mirror, canvas.preview.mirror { transform: scaleX(-1); }
 
 .plan-card[aria-pressed="true"] { border-color: var(--ready); }
 
-.plan-card strong { display: block; font-family: var(--serif); font-size: 16px; }
+.plan-card canvas { width: 56px; height: 74px; display: block; margin: 0 auto 4px; border-radius: 10px; background: #241f1a; }
 
-.plan-card span { display: block; margin-top: 4px; font-size: 12px; color: var(--ivory-dim); }
+.plan-card strong { display: block; font-size: 12px; font-weight: 700; }
+
+.mic {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--ivory);
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.05;
+  padding: 0 4px;
+}
+
+.mic.listening { background: var(--coral); color: white; }
+
+.flow {
+  position: absolute;
+  z-index: 4;
+  left: 50%;
+  bottom: calc(156px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(22, 19, 15, 0.72);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.debug-toggle {
+  position: absolute;
+  z-index: 6;
+  right: 8px;
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.debug-toggle::after {
+  content: "";
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(246, 241, 231, 0.55);
+}
+
+.debug {
+  position: absolute;
+  z-index: 6;
+  right: 10px;
+  bottom: calc(118px + env(safe-area-inset-bottom));
+  max-width: 54%;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(12, 10, 8, 0.82);
+  color: var(--ivory);
+  font: 11px/1.45 ui-monospace, monospace;
+  white-space: pre;
+}
 
 .stale, .warnings {
   position: absolute;
@@ -453,7 +525,8 @@ video.mirror, canvas.preview.mirror { transform: scaleX(-1); }
 
 .badge {
   position: absolute;
-  top: calc(150px + env(safe-area-inset-top));
+  top: auto;
+  bottom: calc(168px + env(safe-area-inset-bottom));
   left: 16px;
   margin: 0;
   padding: 4px 8px;

@@ -1,6 +1,6 @@
 # Framing Cam
 
-A portrait camera that runs in the mobile browser. No install. Someone else holds the phone; the page tells them how to move — left, right, up, down, closer, back, or level the horizon — until the person in front is in a strong frame. The shutter is still a human decision. Auto-capture is optional, and it only fires after the frame has been aligned and steady for about half a second.
+A portrait camera that runs in the mobile browser. No install. Someone else holds the phone. The screen shows a dashed figure where the person should stand and a solid figure where they are now. An arrow says which way to move the phone, and how far. When the two figures overlap, the bar and the shutter ring turn green and, with auto on, it shoots.
 
 The final photo is a real crop of the camera frame, not an upscale. If the person is too small to crop cleanly, the page asks the holder to step closer.
 
@@ -13,8 +13,8 @@ The final photo is a real crop of the camera frame, not an upscale. If the perso
 GitHub Pages: [https://baobao1996121.github.io/framing-cam/](https://baobao1996121.github.io/framing-cam/). Open it in **iOS Safari** or **Android Chrome**. That build has no server, so cloud refine stays off and framing stays on the phone. A Netlify deploy can turn cloud refine on; see [Deploy](#deploy).
 
 1. Tap **打开相机**. Allow the camera, and on iPhone allow motion access so the horizon can be leveled.
-2. Hand the phone to a friend. Use the rear camera. They follow the arrow and the short prompt.
-3. When it says **可以拍了**, tap the shutter, or leave **自动** on and hold still.
+2. Hand the phone to a friend. Use the rear camera. They move until the solid figure sits on the dashed one. The arrow is the phone move; the two-character label under it is the same cue.
+3. The ring turns green and, with **自动** on, the shutter fires. Tap the shutter any time.
 4. Save the current frame, or save all three: **4:5**, **3:4**, and **9:16**. On iPhone you can also long-press the photo.
 
 **先看演示** runs the same coach against a drawn figure, so you can try the guidance without a camera. `?demo=auto` plays that loop by itself. `?lang=en` starts in English. The default language is Simplified Chinese.
@@ -29,11 +29,11 @@ On the phone, MediaPipe Pose and Face Landmarker run in a Web Worker at about 15
 - looking room when the nose points to one side
 - the phone held level, using the motion sensors
 
-Type or speak the look you want (氛围感, 搞笑, 唯美, 显腿长) and tap **AI 构图**. You get two to four shot plans and swipe between them. The selected plan's target drives one instruction at a time: distance first, then a ring that turns green when the person is in place. Auto-capture waits until that ring has been green and the phone steady for about half a second, and it keeps a few recent frames so it can keep the sharpest one. If the scene changes away from the plan, it says **画面变了，重新分析**. With no API key, the same plans are built on the phone.
+As soon as a person is found — a face alone is enough — the phone picks a sensible default plan and draws it as the dashed figure. Style is optional. Hold the round button and talk (it sends itself when you let go, or when the browser hears silence), or type a look such as 氛围感, 搞笑, 唯美, 显腿长 and press return. Two to four plans appear as silhouette cards. The selected card is the target. Distance is corrected before position. Auto-capture waits until the figures match and the phone is steady, and it keeps a few recent frames so it can keep the sharpest one. If the scene changes away from the plan, a small banner says **画面变了，重新分析**. With no API key, the plans are built on the phone. A faint dot at the lower right opens a detector line: ok or not, CPU or GPU, fps, and the last error. iPhone and iPad start on the CPU delegate.
 
-Large errors become a single instruction for the person holding the phone. Small errors are finished by a digital crop. The crop is not allowed to throw away so many pixels that the photo goes soft; past that limit the instruction is **靠近一点**.
+Large errors move the phone. Small errors are finished by a digital crop. The crop is not allowed to throw away so many pixels that the photo goes soft; past that limit the cue is **靠近**.
 
-The GitHub Pages build never calls a server. Framing, the crop, and the shutter all stay on the phone. Netlify (and the local dev server) can ask a vision model for a tighter crop when `LLM_API_KEY` is set. The box is kept only if it contains the head, matches the aspect ratio, and does not cut a joint. With no key, the button stays off and nothing is uploaded.
+The GitHub Pages build never calls a server. Framing, the crop, and the shutter all stay on the phone. Netlify (and the local dev server) can ask a vision model for shot plans when `LLM_API_KEY` is set. A plan is kept only if it has a usable target box. With no key, nothing is uploaded and the on-device plans are used.
 
 Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -113,7 +113,7 @@ Unit tests cover the coach (which way to move, including the mirrored selfie pre
 - iOS and mobile Chrome only expose the camera on HTTPS (or localhost). Stream resolution is whatever `getUserMedia` allows — often 1080p or 4K, not the full still-photo sensor. A still capture from `ImageCapture.takePhoto()` can disagree with the video field of view, so the crop is taken from the same frame the coach saw.
 - Hardware zoom constraints are uneven (mainly iOS 17+) and enlarge by throwing pixels away. This app does not use them. It crops digitally inside a limit, and asks the holder to step closer past that.
 - The level guide needs motion permission. iOS has no vibration API. Voice uses the system speech voices that are installed.
-- Pose and face run on the GPU when they can, and on the CPU otherwise. The first load reads a few megabytes of wasm and models from the same origin.
+- Pose and face try the GPU on desktop and fall back to CPU if a frame fails. iPhone and iPad start on CPU. The first load reads a few megabytes of wasm and models from the same origin. A close-up that shows only a face still counts as a person.
 - The aesthetic ranker is a portrait rule scorer in the spirit of learned crop rankers such as GAIC, not a shipped neural ranking model. A network that large is a poor fit for a first paint on a phone, and the rules are testable.
 - One primary subject. Tap another face to switch. The coach does not direct the person being photographed, only the person holding the phone.
 - No filters, relighting, or beauty retouch. That is deliberate.
@@ -128,7 +128,7 @@ MIT. MediaPipe runtime and landmarker models are Apache-2.0, see `public/vendor/
 
 # 中文
 
-构图相机是一个跑在手机浏览器里的人像相机，不用安装。朋友拿着手机，页面向他提示怎么移动：左右、抬高放低、靠近后退、把地平线摆正，直到被拍的人处在合适的构图里。快门默认由人来按。也可以打开自动拍摄：构图对准并且稳定大约半秒后才拍。
+构图相机是一个跑在手机浏览器里的人像相机，不用安装。朋友拿着手机，屏幕上有两条人影：虚线是该站的位置，实线是现在的人。箭头表示手机往哪边挪、挪多少。两条线重合后，进度条和快门环变绿；开着自动时就会拍。
 
 成片是从相机画面里裁出来的，不会把一小块放大到发糊。人如果太小，页面会请拿手机的人走近。
 
@@ -139,8 +139,8 @@ MIT. MediaPipe runtime and landmarker models are Apache-2.0, see `public/vendor/
 GitHub Pages：[https://baobao1996121.github.io/framing-cam/](https://baobao1996121.github.io/framing-cam/)。用 **iOS Safari** 或 **Android Chrome** 打开。这个构建没有服务器，云端微调保持关闭，构图在手机上完成。若要打开云端微调，用 Netlify，见 [部署](#部署)。
 
 1. 点 **打开相机**。允许摄像头；在 iPhone 上再允许动作与方向，才能校正地平线。
-2. 把手机交给朋友，用后置摄像头。对方看箭头和那一句短提示。
-3. 出现 **可以拍了** 就按快门。开着 **自动** 时，稳住约半秒会自己拍。
+2. 把手机交给朋友，用后置摄像头。把实线人影挪到虚线上。箭头是手机该移动的方向，下面两个字是同一句提示。
+3. 圆环变绿后，开着 **自动** 就会拍。也可以随时按快门。
 4. 保存当前画幅，或一次保存 **4:5**、**3:4**、**9:16**。iPhone 上也可以长按照片保存。
 
 **先看演示** 用一个画出来的人走同一套引导，没有相机也能看提示。地址加上 `?demo=auto` 会自动把人物走到可拍的位置。`?lang=en` 使用英文。默认语言是简体中文。
@@ -155,11 +155,11 @@ GitHub Pages：[https://baobao1996121.github.io/framing-cam/](https://baobao1996
 - 鼻子偏向一侧时，给视线留空
 - 用运动传感器把手机摆平
 
-打字或按住「说」，告诉它你想要的感觉（氛围感、搞笑、唯美、显腿长），再点 **AI 构图**。会得到两到四个方案，左右滑动切换。选中的方案决定目标框：先把距离走对，再细调位置，对准时圆环变绿。自动拍摄会等到圆环变绿并且手机稳定约半秒，并在最近几帧里留下更清晰的一张。画面如果偏离了当时分析的内容，会提示 **画面变了，重新分析**。没有密钥时，这些方案改在手机上生成。
+只要认出人（只有脸的特写也算），手机会先放上一个默认方案，画成虚线人影。风格是可选的。按住圆钮说话，松手或检测到静音后会自己送出；也可以打字（氛围感、搞笑、唯美、显腿长）后回车。两到四个方案是人影缩略图，点一张就换成那条虚线。先把远近走对，再挪位置。自动拍摄会等到人影重合并且手机稳定，并在最近几帧里留下更清晰的一张。画面如果偏离了当时的方案，会出现 **画面变了，重新分析**。没有密钥时，方案在手机上生成。右下角有一个淡点，点开能看到检测是否成功、CPU 还是 GPU、帧率，以及最近一次错误。iPhone 和 iPad 从 CPU 开始检测。
 
-偏差大的时候，只给拿手机的人一条指令。剩下的小偏差用数字裁切收干净。裁切不允许丢掉太多像素；超过限度就改口说 **靠近一点**。
+偏差大的时候，移动手机来补。剩下的小偏差用数字裁切收干净。裁切不允许丢掉太多像素；超过限度就提示 **靠近**。
 
-GitHub Pages 上的版本不会请求服务器。构图、裁切和快门都在手机里完成。Netlify 和本地开发服务器在设置了 `LLM_API_KEY` 时，可以请视觉模型给一个更紧的裁切框。框必须包住头、符合画幅、而且不切断关节，才会被采用。没有密钥时按钮保持关闭，不会上传画面。
+GitHub Pages 上的版本不会请求服务器。构图、裁切和快门都在手机里完成。Netlify 和本地开发服务器在设置了 `LLM_API_KEY` 时，可以请视觉模型给拍摄方案。方案必须带可用的目标框才会被采用。没有密钥时不上传画面，改用手机上的方案。
 
 细节见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
@@ -239,7 +239,7 @@ npm run build
 - iOS 和手机 Chrome 只在 HTTPS（或 localhost）上提供相机。`getUserMedia` 的分辨率通常是 1080p 或 4K 这一档，不是传感器的完整静物分辨率。`ImageCapture.takePhoto()` 的视野可能和预览不一致，所以裁切使用的是引导所看到的那一帧。
 - 硬件变焦约束并不普遍（主要是 iOS 17 及以后），而且变焦会丢掉像素。本应用不用它。数字裁切有上限，超过就请拿手机的人走近。
 - 水平校正需要动作传感器权限。iOS 没有振动接口。语音依赖系统里已安装的语音包。
-- 姿势和人脸能用 GPU 就用 GPU，否则用 CPU。第一次打开会从同一域名读取数兆的 wasm 和模型。
+- 桌面端姿势和人脸先试 GPU，某一帧失败就改用 CPU。iPhone 和 iPad 从 CPU 开始。第一次打开会从同一域名读取数兆的 wasm 和模型。只有脸的特写也算一个人。
 - 审美排序是一套人像规则打分，思路接近 GAIC 这类「给裁切打分再排序」的方法，但没有附带一个神经网络排序模型。那样的模型太大，不适合手机上的第一次打开，而这套规则可以被测试。
 - 默认只跟一个主体。点另一张脸可以切换。引导只对拿手机的人说话，不指挥被拍的人摆姿势。
 - 没有滤镜、补光或美颜。这是有意为之。

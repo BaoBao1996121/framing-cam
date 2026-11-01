@@ -53,9 +53,31 @@ const certificate =
     ? { key: readFileSync(process.env.HTTPS_KEY), cert: readFileSync(process.env.HTTPS_CERT) }
     : undefined;
 
+function redirectToBase(): Plugin {
+  const send = (request: IncomingMessage, response: ServerResponse, next: (error?: unknown) => void) => {
+    const url = request.url || "/";
+    if (url === "/" || url.startsWith("/?")) {
+      response.statusCode = 302;
+      response.setHeader("Location", `/framing-cam/${url.slice(1)}`);
+      response.end();
+      return;
+    }
+    next();
+  };
+  return {
+    name: "redirect-to-base",
+    configureServer(server) {
+      server.middlewares.use(send);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(send);
+    },
+  };
+}
+
 export default defineConfig({
-  base: "./",
-  plugins: [apiPlugin(), ...(process.env.HTTPS === "1" && !certificate ? [basicSsl()] : [])],
+  base: "/framing-cam/",
+  plugins: [redirectToBase(), apiPlugin(), ...(process.env.HTTPS === "1" && !certificate ? [basicSsl()] : [])],
   server: { host: true, port: 5173, https: certificate },
   preview: { host: true, port: 4173, https: certificate },
   optimizeDeps: { exclude: ["@mediapipe/tasks-vision"] },

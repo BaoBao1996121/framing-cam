@@ -73,7 +73,13 @@ export class VisionClient {
   }
 }
 
+/** Join a public asset onto Vite's base, whether that base is `/framing-cam/` or a full URL. */
+export function publicUrl(baseUrl: string, pageHref: string, assetPath: string): string {
+  const base = new URL(baseUrl, pageHref);
+  const relative = assetPath.replace(/^\//, "");
+  return new URL(relative, base).href;
+}
+
 export function vendorUrl(path: string): string {
-  const base = new URL(import.meta.env.BASE_URL, window.location.href);
-  return new URL(path, base).href;
+  return publicUrl(import.meta.env.BASE_URL, window.location.href, path);
 }

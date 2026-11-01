@@ -63,7 +63,9 @@ Prompts are stabilized for a few frames so they do not flicker. Ready and "find 
 
 ## Cloud crop
 
-`server/handle.ts` is imported by the Vite dev middleware and by `api/frame.ts` / `api/health.ts` on Vercel. The key is read from the environment on the server. The client only learns a boolean from `/api/health`.
+The published site is a GitHub Pages project at `base: '/framing-cam/'`. Asset URLs, including wasm and the `.task` models, are joined onto that base. The production bundle does not call `/api`, so a missing server is not a failed request. Cloud refine stays off.
+
+`server/handle.ts` is imported only by the Vite dev middleware (`/api/health`, `/api/frame`). The key stays in the dev environment. The client asks `/api/health` only while `import.meta.env.DEV` is true.
 
 The request is one JPEG, long edge 768, plus the landmark summary and the rules box. The prompt asks for JSON: a normalized box, one move, one sentence, a confidence. The provider is OpenAI, any OpenAI-compatible base URL, or Anthropic. Invalid JSON, a box that misses the head, a box past the zoom limit, or a box that cuts a joint is discarded. Arrows stay on the local rules so a slow or wrong model cannot yank the holder around. A accepted box only replaces the crop.
 
@@ -154,7 +156,9 @@ Filters, skin smoothing, relighting, a social feed, and any instruction aimed at
 
 ## 云端裁切
 
-`server/handle.ts` 同时被 Vite 开发服务器和 Vercel 上的 `api/frame.ts`、`api/health.ts` 使用。密钥只在服务端的环境变量里。客户端只能从 `/api/health` 知道有没有密钥。
+发布站点是 GitHub Pages 项目站，`base` 为 `/framing-cam/`。资源地址，包括 wasm 和 `.task` 模型，都接在这个 base 后面。生产包不会请求 `/api`，所以没有服务器也不会出现失败请求。云端微调保持关闭。
+
+`server/handle.ts` 只被 Vite 开发服务器的 `/api/health` 和 `/api/frame` 使用。密钥留在开发环境里。客户端只在 `import.meta.env.DEV` 为真时才会询问 `/api/health`。
 
 请求体是一张长边 768 的 JPEG，加上关键点摘要和规则框。提示词要求只返回 JSON：一个归一化的框、一个动作、一句话、一个置信度。供应商可以是 OpenAI、任何兼容 OpenAI 的地址，或 Anthropic。JSON 无效、框没有包住头、超过变焦限度、或切断关节，都会丢掉。箭头始终由本地规则决定，慢的或错的模型不能把拿手机的人拽来拽去。通过检查的框只替换裁切。
 

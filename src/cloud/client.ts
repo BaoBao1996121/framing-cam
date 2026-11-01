@@ -1,6 +1,8 @@
 import type { LlmSuggestion, Rect, Subject } from "../composition/types";
 
 export async function cloudAvailable(): Promise<boolean> {
+  // The GitHub Pages build has no API. Skip the request so a 404 never shows up.
+  if (!import.meta.env.DEV) return false;
   try {
     const response = await fetch("/api/health");
     if (!response.ok) return false;
@@ -37,6 +39,7 @@ export async function requestCloudCrop(input: {
   subject: Subject | null;
   rulesBox: Rect;
 }): Promise<LlmSuggestion | null> {
+  if (!import.meta.env.DEV) return null;
   const response = await fetch("/api/frame", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -50,11 +53,14 @@ export async function requestCloudCrop(input: {
       rulesBox: input.rulesBox,
     }),
   });
-  const body = (await response.json()) as {
-    ok?: boolean;
-    framing?: { box: Rect; confidence?: number; reasoning?: string };
-  };
-  if (!response.ok || !body.ok || !body.framing?.box) return null;
+  if (!response.ok) return null;
+  let body: { ok?: boolean; framing?: { box: Rect; confidence?: number; reasoning?: string } };
+  try {
+    body = (await response.json()) as typeof body;
+  } catch {
+    return null;
+  }
+  if (!body.ok || !body.framing?.box) return null;
   return {
     box: body.framing.box,
     confidence: body.framing.confidence ?? 0.5,

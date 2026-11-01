@@ -10,12 +10,12 @@ The final photo is a real crop of the camera frame, not an upscale. If the perso
 
 ## Try it on a phone
 
-1. Deploy it (Vercel is the easiest path that also enables the optional cloud crop), or run the HTTPS dev server below.
-2. Open the URL in **iOS Safari** or **Android Chrome**. The camera only works on HTTPS, or on `localhost`.
-3. Tap **打开相机**, allow the camera, and — on iPhone — allow motion access so the horizon can be leveled.
-4. Hand the phone to a friend. Use the rear camera. They follow the arrow and the short prompt.
-5. When it says **可以拍了**, tap the shutter, or leave **自动** on and hold still.
-6. Save the current frame, or save all three: **4:5**, **3:4**, and **9:16**. On iPhone you can also long-press the photo.
+The static site is [https://baobao1996121.github.io/framing-cam/](https://baobao1996121.github.io/framing-cam/). Open it in **iOS Safari** or **Android Chrome**. The published site has no server: cloud refine stays off, and framing stays on the phone.
+
+1. Tap **打开相机**. Allow the camera, and on iPhone allow motion access so the horizon can be leveled.
+2. Hand the phone to a friend. Use the rear camera. They follow the arrow and the short prompt.
+3. When it says **可以拍了**, tap the shutter, or leave **自动** on and hold still.
+4. Save the current frame, or save all three: **4:5**, **3:4**, and **9:16**. On iPhone you can also long-press the photo.
 
 **先看演示** runs the same coach against a drawn figure, so you can try the guidance without a camera. `?demo=auto` plays that loop by itself. `?lang=en` starts in English. The default language is Simplified Chinese.
 
@@ -31,7 +31,7 @@ On the phone, MediaPipe Pose and Face Landmarker run in a Web Worker at about 15
 
 Large errors become a single instruction for the person holding the phone. Small errors are finished by a digital crop. The crop is not allowed to throw away so many pixels that the photo goes soft; past that limit the instruction is **靠近一点**.
 
-When the phone is steady, and only if you configured an API key, one small JPEG is sent to a serverless function. A vision model may return a tighter crop box. The box is kept only if it still contains the head, matches the aspect ratio, and does not cut a joint. With no key, or if the call fails, nothing leaves the phone.
+The GitHub Pages build never calls a server. Framing, the crop, and the shutter all stay on the phone. A local dev server can still offer an optional cloud crop when `LLM_API_KEY` is set; the box is kept only if it contains the head, matches the aspect ratio, and does not cut a joint.
 
 Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -40,7 +40,7 @@ Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ```bash
 npm install
 npm test
-npm run dev          # http://localhost:5173 — camera works on this computer
+npm run dev          # http://localhost:5173/framing-cam/
 npm run dev:https    # https on your LAN, self-signed certificate
 ```
 
@@ -48,7 +48,7 @@ npm run dev:https    # https on your LAN, self-signed certificate
 
 ### Phone on the same Wi-Fi
 
-Self-signed HTTPS (`npm run dev:https`) is enough for many Android phones: open `https://<your-lan-ip>:5173` and continue past the warning.
+Self-signed HTTPS (`npm run dev:https`) is enough for many Android phones: open `https://<your-lan-ip>:5173/framing-cam/` and continue past the warning.
 
 iOS Safari is stricter. A certificate you trust locally is more reliable:
 
@@ -60,45 +60,21 @@ mkcert -key-file certs/dev-key.pem -cert-file certs/dev-cert.pem localhost 192.1
 npm run dev:mkcert
 ```
 
-Use your computer's LAN address in the `mkcert` command. Install the mkcert root CA on the iPhone (mkcert's docs describe this), then open `https://192.168.1.20:5173`.
+Use your computer's LAN address in the `mkcert` command. Install the mkcert root CA on the iPhone (mkcert's docs describe this), then open `https://192.168.1.20:5173/framing-cam/`.
 
-Desktop `http://localhost:5173` is a secure context, so the camera works there without HTTPS. Another computer on the LAN using plain `http://192.168.x.x` is not a secure context, and `getUserMedia` will fail.
+Desktop `http://localhost:5173/framing-cam/` is a secure context, so the camera works there without HTTPS. Another computer on the LAN using plain `http://192.168.x.x` is not a secure context, and `getUserMedia` will fail.
 
-The dev server also exposes `GET /api/health` and `POST /api/frame`. Copy `.env.example` to `.env` if you want the cloud crop locally. Leave `LLM_API_KEY` empty to stay rules-only.
+The dev server can expose `GET /api/health` and `POST /api/frame`. Copy `.env.example` to `.env` if you want that local cloud crop. The published site does not use it. Leave `LLM_API_KEY` empty to stay rules-only even in dev.
 
 ## Deploy
 
-### Vercel
+GitHub Pages hosts the site at [https://baobao1996121.github.io/framing-cam/](https://baobao1996121.github.io/framing-cam/).
 
-The repo is a Vite app plus `api/health.ts` and `api/frame.ts`.
+Pushing `main` runs `.github/workflows/pages.yml`. It builds the Vite app with `base: '/framing-cam/'` and deploys `dist` with `actions/deploy-pages`. In the repository settings, set Pages → Build and deployment → Source to **GitHub Actions**.
 
-1. Import the GitHub repository in Vercel. Framework preset: Vite. Output: `dist`.
-2. Set environment variables (server only, never `VITE_`):
+The static build does not call `/api`. Cloud refine stays off, with no failed request. Pose and face models and the wasm runtime are copied into `dist/vendor` and requested under `/framing-cam/vendor/...`.
 
-| Variable | Purpose |
-| --- | --- |
-| `LLM_API_KEY` | Secret for the vision model. Empty disables cloud refine. |
-| `LLM_PROVIDER` | `openai` (default), `openai-compatible`, or `anthropic` |
-| `LLM_BASE_URL` | Optional. OpenAI-compatible proxy, for example `https://openrouter.ai/api/v1` |
-| `LLM_MODEL` | Optional. Default `gpt-4o-mini`, or `claude-3-5-haiku-latest` for Anthropic |
-
-`gpt-4o-mini` still accepts images on the OpenAI API; OpenAI plans to remove it on 14 January 2027 and points people to `gpt-6-luna`. Set `LLM_MODEL` when you want a different model. Newer GPT models are called with `reasoning_effort: none` so the reply stays a short JSON crop.
-
-3. Deploy. Open the HTTPS URL on a phone.
-
-### GitHub Pages
-
-Pages can host the static app only. Cloud refine stays off, and the on-device coach still works.
-
-`base` is `./`, so the build works at a project-site path such as `https://<user>.github.io/framing-cam/`.
-
-```bash
-npm ci
-npm run build
-# publish the dist/ directory with your Pages action or branch
-```
-
-Do not put an API key in the client. There is nowhere safe to put one on Pages.
+There is no API key on the client. Optional cloud refine exists only on the local dev server.
 
 ## Tests
 
@@ -119,7 +95,7 @@ Unit tests cover the coach (which way to move, including the mirrored selfie pre
 - One primary subject. Tap another face to switch. The coach does not direct the person being photographed, only the person holding the phone.
 - No filters, relighting, or beauty retouch. That is deliberate.
 - A tilted or sideways video buffer on a particular Android build can misalign the overlay. The crop and the overlay use the same buffer, so they still match each other.
-- Cloud refine sees a 768px JPEG of one steady frame. It can be wrong; geometry checks drop bad boxes.
+- The GitHub Pages site does not upload frames. Cloud refine exists only on the local dev server, and a bad box is dropped if it misses the head or cuts a joint.
 
 ## License
 
@@ -137,12 +113,12 @@ MIT. MediaPipe runtime and landmarker models are Apache-2.0, see `public/vendor/
 
 ## 在手机上试用
 
-1. 部署到 Vercel（这样可选的云端裁切也能用），或者按下面的方式在局域网开 HTTPS。
-2. 用 **iOS Safari** 或 **Android Chrome** 打开。相机只在 HTTPS 或 `localhost` 上可用。
-3. 点 **打开相机**。允许摄像头；在 iPhone 上再允许动作与方向，才能校正地平线。
-4. 把手机交给朋友，用后置摄像头。对方看箭头和那一句短提示。
-5. 出现 **可以拍了** 就按快门。开着 **自动** 时，稳住约半秒会自己拍。
-6. 保存当前画幅，或一次保存 **4:5**、**3:4**、**9:16**。iPhone 上也可以长按照片保存。
+静态站点：[https://baobao1996121.github.io/framing-cam/](https://baobao1996121.github.io/framing-cam/)。用 **iOS Safari** 或 **Android Chrome** 打开。发布的页面没有服务器：云端微调保持关闭，构图在手机上完成。
+
+1. 点 **打开相机**。允许摄像头；在 iPhone 上再允许动作与方向，才能校正地平线。
+2. 把手机交给朋友，用后置摄像头。对方看箭头和那一句短提示。
+3. 出现 **可以拍了** 就按快门。开着 **自动** 时，稳住约半秒会自己拍。
+4. 保存当前画幅，或一次保存 **4:5**、**3:4**、**9:16**。iPhone 上也可以长按照片保存。
 
 **先看演示** 用一个画出来的人走同一套引导，没有相机也能看提示。地址加上 `?demo=auto` 会自动把人物走到可拍的位置。`?lang=en` 使用英文。默认语言是简体中文。
 
@@ -158,7 +134,7 @@ MIT. MediaPipe runtime and landmarker models are Apache-2.0, see `public/vendor/
 
 偏差大的时候，只给拿手机的人一条指令。剩下的小偏差用数字裁切收干净。裁切不允许丢掉太多像素；超过限度就改口说 **靠近一点**。
 
-只有配置了 API 密钥、并且手机稳定时，才会把一帧缩小的 JPEG 发给无服务器函数。视觉模型可以返回一个更紧的裁切框。这个框必须仍然包住头、符合画幅、而且不切断关节，才会被采用。没有密钥或请求失败时，画面不会离开手机。
+GitHub Pages 上的版本不会请求服务器。构图、裁切和快门都在手机里完成。本地开发服务器在设置了 `LLM_API_KEY` 时仍可以做可选的云端裁切；返回的框必须包住头、符合画幅、而且不切断关节，才会被采用。
 
 细节见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
@@ -167,7 +143,7 @@ MIT. MediaPipe runtime and landmarker models are Apache-2.0, see `public/vendor/
 ```bash
 npm install
 npm test
-npm run dev          # http://localhost:5173 ，在这台电脑上可以开相机
+npm run dev          # http://localhost:5173/framing-cam/
 npm run dev:https    # 局域网 HTTPS，自签证书
 ```
 
@@ -175,7 +151,7 @@ npm run dev:https    # 局域网 HTTPS，自签证书
 
 ### 同一 Wi-Fi 下的手机
 
-很多 Android 手机用 `npm run dev:https` 即可：打开 `https://<电脑局域网 IP>:5173`，忽略证书警告。
+很多 Android 手机用 `npm run dev:https` 即可：打开 `https://<电脑局域网 IP>:5173/framing-cam/`，忽略证书警告。
 
 iOS Safari 对自签证书很严。更稳妥的是本地信任的证书：
 
@@ -187,45 +163,21 @@ mkcert -key-file certs/dev-key.pem -cert-file certs/dev-cert.pem localhost 192.1
 npm run dev:mkcert
 ```
 
-把命令里的地址换成你电脑的局域网 IP。按 mkcert 的说明把根证书装到 iPhone 上，然后打开 `https://192.168.1.20:5173`。
+把命令里的地址换成你电脑的局域网 IP。按 mkcert 的说明把根证书装到 iPhone 上，然后打开 `https://192.168.1.20:5173/framing-cam/`。
 
-电脑上的 `http://localhost:5173` 属于安全上下文，不装 HTTPS 也能开相机。局域网里用 `http://192.168.x.x` 则不是安全上下文，`getUserMedia` 会失败。
+电脑上的 `http://localhost:5173/framing-cam/` 属于安全上下文，不装 HTTPS 也能开相机。局域网里用 `http://192.168.x.x` 则不是安全上下文，`getUserMedia` 会失败。
 
-开发服务器同时提供 `GET /api/health` 和 `POST /api/frame`。需要云端裁切时，把 `.env.example` 复制为 `.env`。`LLM_API_KEY` 留空就只使用本机构图。
+开发服务器可以提供 `GET /api/health` 和 `POST /api/frame`。只想在本地试云端裁切时，把 `.env.example` 复制为 `.env`。发布的站点不会用到它。`LLM_API_KEY` 留空时，本地也只用本机构图。
 
 ## 部署
 
-### Vercel
+GitHub Pages 地址：[https://baobao1996121.github.io/framing-cam/](https://baobao1996121.github.io/framing-cam/)。
 
-这是一个 Vite 应用，外加 `api/health.ts` 和 `api/frame.ts`。
+推送到 `main` 会运行 `.github/workflows/pages.yml`。它用 `base: '/framing-cam/'` 构建 Vite 应用，再用 `actions/deploy-pages` 发布 `dist`。仓库设置里把 Pages → Build and deployment → Source 选成 **GitHub Actions**。
 
-1. 在 Vercel 导入本仓库。框架选 Vite，输出目录 `dist`。
-2. 只在服务端配置环境变量，不要加 `VITE_` 前缀：
+静态构建不会请求 `/api`。云端微调保持关闭，也不会出现失败请求。姿势、人脸模型和 wasm 会复制进 `dist/vendor`，并从 `/framing-cam/vendor/...` 加载。
 
-| 变量 | 作用 |
-| --- | --- |
-| `LLM_API_KEY` | 视觉模型的密钥。留空则关闭云端微调 |
-| `LLM_PROVIDER` | `openai`（默认）、`openai-compatible` 或 `anthropic` |
-| `LLM_BASE_URL` | 可选。兼容 OpenAI 的代理，例如 `https://openrouter.ai/api/v1` |
-| `LLM_MODEL` | 可选。OpenAI 默认 `gpt-4o-mini`，Anthropic 默认 `claude-3-5-haiku-latest` |
-
-`gpt-4o-mini` 目前仍可在 OpenAI API 中看图；OpenAI 计划于 2027 年 1 月 14 日下线它，并建议改用 `gpt-6-luna`。想换模型就设置 `LLM_MODEL`。较新的 GPT 会带上 `reasoning_effort: none`，避免长篇推理，只返回一段裁切 JSON。
-
-3. 部署后，用手机打开那个 HTTPS 地址。
-
-### GitHub Pages
-
-Pages 只能托管静态页面。云端微调不可用，手机上的构图引导仍然可用。
-
-构建的 `base` 是 `./`，因此可以放在 `https://<user>.github.io/framing-cam/` 这样的项目站路径下。
-
-```bash
-npm ci
-npm run build
-# 用 Pages 动作或分支发布 dist/
-```
-
-不要把 API 密钥放进前端。Pages 上没有可以安全存放密钥的地方。
+前端没有 API 密钥。可选的云端裁切只存在于本地开发服务器。
 
 ## 测试
 
@@ -246,7 +198,7 @@ npm run build
 - 默认只跟一个主体。点另一张脸可以切换。引导只对拿手机的人说话，不指挥被拍的人摆姿势。
 - 没有滤镜、补光或美颜。这是有意为之。
 - 个别 Android 机型的视频缓冲方向若和预览不一致，叠层可能对不齐。裁切和叠层使用同一块缓冲，因此它们彼此仍然一致。
-- 云端微调只看到稳定时的一张 768 像素 JPEG。它可能判断错；几何检查会丢掉不合格的框。
+- GitHub Pages 上的站点不会上传画面。云端微调只在本地开发服务器里，不合格的框（没包住头，或切断关节）会被丢掉。
 
 ## 许可证
 

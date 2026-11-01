@@ -1,0 +1,49 @@
+import { chooseRoll, linearAccelerationG } from "./level";
+
+type Vec3 = { x: number; y: number; z: number };
+
+export class MotionLevel {
+  gravity: Vec3 | null = null;
+  gamma: number | null = null;
+  beta: number | null = null;
+  linearG: number | null = null;
+
+  roll(): number | null {
+    return chooseRoll({ gravity: this.gravity, gamma: this.gamma, beta: this.beta });
+  }
+
+  async request(): Promise<void> {
+    const motion = DeviceMotionEvent as unknown as { requestPermission?: () => Promise<string> };
+    const orientation = DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> };
+    const asks: Promise<unknown>[] = [];
+    if (typeof motion.requestPermission === "function") asks.push(motion.requestPermission().catch(() => "denied"));
+    if (typeof orientation.requestPermission === "function") asks.push(orientation.requestPermission().catch(() => "denied"));
+    await Promise.all(asks);
+    window.addEventListener("deviceorientation", this.onOrientation);
+    window.addEventListener("devicemotion", this.onMotion);
+  }
+
+  stop(): void {
+    window.removeEventListener("deviceorientation", this.onOrientation);
+    window.removeEventListener("devicemotion", this.onMotion);
+  }
+
+  private onOrientation = (event: DeviceOrientationEvent): void => {
+    this.gamma = event.gamma;
+    this.beta = event.beta;
+  };
+
+  private onMotion = (event: DeviceMotionEvent): void => {
+    const gravity = event.accelerationIncludingGravity;
+    if (gravity && gravity.x != null && gravity.y != null && gravity.z != null) {
+      this.gravity = { x: gravity.x, y: gravity.y, z: gravity.z };
+    }
+    const acceleration = event.acceleration;
+    if (acceleration && acceleration.x != null && acceleration.y != null && acceleration.z != null) {
+      this.linearG = linearAccelerationG(
+        { x: acceleration.x, y: acceleration.y, z: acceleration.z },
+        this.gravity,
+      );
+    }
+  };
+}

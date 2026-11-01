@@ -1,0 +1,10 @@
+MediaPipe Tasks vision runtime and the face/pose landmarker models are
+Google's MediaPipe models, used here under the Apache License 2.0.
+
+https://developers.google.com/edge/mediapipe/solutions/vision/pose_landmarker
+https://developers.google.com/edge/mediapipe/solutions/vision/face_landmarker
+
+The .task files in this folder are stored so the camera can start without
+downloading them from storage.googleapis.com at runtime. The WebAssembly
+runtime is copied from @mediapipe/tasks-vision during npm install and is not
+committed.

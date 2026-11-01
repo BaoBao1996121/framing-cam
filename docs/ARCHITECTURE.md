@@ -1,0 +1,179 @@
+# Architecture
+
+Framing Cam is a static Vite + TypeScript app plus two serverless endpoints. The phone does the time-critical work. The network is optional and only refines a crop.
+
+## Pipeline
+
+```text
+camera frame
+  -> 960px ImageBitmap (main thread, ~15 fps)
+  -> Web Worker: MediaPipe Pose + Face Landmarker
+  -> subject (head, eyes, joints), smoothed and tracked
+  -> planFrame(): one instruction + one crop rectangle
+  -> overlay (brackets, arrow, level line) and optional speech / vibration
+  -> when steady ~0.5s and a key exists: one JPEG to /api/frame
+  -> shutter (human, or auto once the plan says ready)
+  -> JPEG crops at 4:5, 3:4, 9:16
+```
+
+`planFrame` in `src/composition/plan.ts` is a pure function. The UI, the worker, and the demo all call it. Tests call it with synthetic subjects and with landmarks read back from a painted PNG.
+
+## On-device vision
+
+`src/vision/worker.ts` loads `@mediapipe/tasks-vision` 0.10.35.
+
+- Pose: `pose_landmarker_lite` float16 (33 landmarks). This is enough to know shoulders, elbows, wrists, hips, knees, and ankles, and to estimate a head if the face model misses.
+- Face: `face_landmarker` float16. The worker keeps a handful of points (forehead, chin, eyes, nose, cheeks), not all 478. Hair is not a landmark; the skull top is estimated at about 0.55 of the face-mesh height above the forehead point.
+- The wasm files are the ES module build (`vision_wasm_module_internal`). Module workers cannot `importScripts`. The module build assigns `globalThis.ModuleFactory`. MediaPipe clears that factory after creating a task, so the worker imports the loader once, keeps the factory, and restores it before starting the face landmarker. Pose and face therefore get two wasm instances. If the face model fails, pose-only guidance still runs.
+- GPU is tried first, then CPU. Face inference drops to every other frame when it takes longer than 45 ms.
+- Models and wasm are same-origin (`public/vendor`). They are not fetched from `storage.googleapis.com` at runtime.
+
+The main thread never waits on a backlog. If the worker is busy, the frame is dropped.
+
+## Coordinates
+
+Landmarks are normalized to the camera buffer, origin top-left, y downward. Aspect ratio is always computed in pixels, because a normalized `w/h` is not the photo's aspect unless the buffer is square.
+
+The preview uses `object-fit: cover`. `coverTransform` maps buffer coordinates onto the screen. The front camera is mirrored with CSS; guidance left/right is flipped to match what the holder sees, and the saved selfie is mirrored so it matches the preview. Rear camera output is not mirrored.
+
+The level line comes from motion, not from the shoulders (the subject may lean). `rollFromGravity` uses acceleration including gravity: positive means the right side of the phone is lower. Gamma is the fallback. A phone lying flat does not produce a portrait roll.
+
+## Composition
+
+`src/composition/rank.ts` builds a few dozen candidate rectangles:
+
+- vertical spans for head, chest, waist, mid-thigh, and full length, only where those joints exist
+- horizontal placement centered, or toward the opposite side of the gaze so there is looking room
+- an analytic crop that puts the eyes on the upper-third line at the ideal head size
+- the largest rectangle of the requested aspect (the viewfinder itself)
+
+Each candidate is scored on eye line, headroom, horizontal placement, how large the head is inside the crop, shoulder inclusion, and a penalty when an edge passes through a joint or the neck. Candidates tighter than `MAX_DIGITAL_ZOOM` (1.65× relative to the full aspect frame) are dropped unless nothing legal remains. The winner is what the shutter crops.
+
+This is the GAIC idea — generate crops, rank them — without a GAIC network. Those models are large classification/regression nets trained on aesthetic datasets. Shipping one would dominate download size and still would not know "do not cut the knee". The rule scorer is deterministic and covered by tests. `prepareLlmCrop` is the seam where a future ranker could sit: it must return a rectangle that survives the same geometric checks.
+
+Guidance is separate from the crop. The holder is asked to move until the eyes and the head size already sit well inside the full viewfinder. The crop only cleans up what remains, which keeps resolution. Priority:
+
+1. nobody in frame
+2. phone upside down, or the person is much too small / much too close
+3. a large tilt
+4. the largest remaining error among pan, vertical, distance, and small tilt
+5. hold steady, then ready
+
+Prompts are stabilized for a few frames so they do not flicker. Ready and "find the person" switch immediately. Auto-capture fires once when `ready` is true. `ready` already requires the steady detector's 500 ms window of still landmarks (and, when the accelerometer is present and the picture is not rock-steady, low linear acceleration).
+
+## Cloud crop
+
+`server/handle.ts` is imported by the Vite dev middleware and by `api/frame.ts` / `api/health.ts` on Vercel. The key is read from the environment on the server. The client only learns a boolean from `/api/health`.
+
+The request is one JPEG, long edge 768, plus the landmark summary and the rules box. The prompt asks for JSON: a normalized box, one move, one sentence, a confidence. The provider is OpenAI, any OpenAI-compatible base URL, or Anthropic. Invalid JSON, a box that misses the head, a box past the zoom limit, or a box that cuts a joint is discarded. Arrows stay on the local rules so a slow or wrong model cannot yank the holder around. A accepted box only replaces the crop.
+
+## Demo
+
+`src/demo/person.ts` synthesizes the same `Subject` the vision worker would produce. `applyGuidance` moves that subject the way the frame would move if a holder obeyed the current prompt. The unit test runs this loop until the plan is ready. The in-app demo draws that subject and, with `?demo=auto`, runs the same loop.
+
+## iOS and Android constraints
+
+| Constraint | What the app does |
+| --- | --- |
+| `getUserMedia` needs a secure context | README: localhost, mkcert, or Vercel HTTPS |
+| Zoom constraints mainly on iOS 17+ | Not used. Digital crop plus "step closer" |
+| `ImageCapture.takePhoto` field of view can differ from the preview | Crop the video frame the coach analyzed. Request the largest stream the browser will give |
+| `playsinline` | Set, or iOS plays the camera fullscreen |
+| Module worker + MediaPipe wasm | ES module wasm build; factory restored for the second model |
+| No vibration on iOS | `navigator.vibrate` is feature-detected |
+| Motion permission is a user gesture | Requested on the same tap as the camera |
+
+## What is intentionally absent
+
+Filters, skin smoothing, relighting, a social feed, and any instruction aimed at the person being photographed. The product being referenced asks a friend to frame you. This app does that job and stops.
+
+---
+
+# 架构（中文）
+
+构图相机是一个 Vite + TypeScript 静态应用，加上两个无服务器接口。要紧的计算在手机上。网络是可选的，只用来微调裁切。
+
+## 流水线
+
+```text
+相机帧
+  -> 主线程压到长边约 960 像素（大约 15 帧/秒）
+  -> Web Worker：MediaPipe 姿势 + 人脸关键点
+  -> 主体（头、眼睛、关节），平滑并跟踪
+  -> planFrame()：一条指令 + 一个裁切矩形
+  -> 叠层（取景框、箭头、水平线），以及可选的语音和振动
+  -> 稳定约 0.5 秒且配置了密钥时：一张 JPEG 到 /api/frame
+  -> 快门（人按，或计划变为 ready 时自动）
+  -> 输出 4:5、3:4、9:16 的 JPEG
+```
+
+`src/composition/plan.ts` 里的 `planFrame` 是纯函数。界面、Worker 和演示都调用它。测试用合成的主体，也用从绘制的 PNG 里读回来的关键点调用它。
+
+## 端上视觉
+
+`src/vision/worker.ts` 使用 `@mediapipe/tasks-vision` 0.10.35。
+
+- 姿势：`pose_landmarker_lite` float16（33 个点）。足以得到肩、肘、腕、髋、膝、踝；人脸模型失败时也可以估出一个头。
+- 人脸：`face_landmarker` float16。Worker 只保留额头、下巴、眼、鼻、脸颊，不传全部 478 个点。头发不是关键点；颅顶按脸网格高度的大约 0.55 倍，加在额头点之上。
+- wasm 用的是 ES module 构建（`vision_wasm_module_internal`）。Module worker 不能 `importScripts`。这个构建会把 `ModuleFactory` 挂到 `globalThis`。MediaPipe 创建完一个任务后会清掉这个工厂，因此 Worker 先导入一次加载器，留下工厂，在启动人脸模型前再放回去。姿势和人脸于是各有一份 wasm 实例。人脸失败时，仍可用姿势做引导。
+- 先试 GPU，不行再用 CPU。人脸推理超过 45 毫秒时，改为隔帧运行。
+- 模型和 wasm 都在同一域名（`public/vendor`），运行时不向 `storage.googleapis.com` 请求。
+
+主线程不堆积帧。Worker 正忙时，这一帧直接丢掉。
+
+## 坐标
+
+关键点相对相机缓冲归一化，原点在左上，y 向下。画幅一定在像素里算，因为归一化的 `w/h` 只有在缓冲是正方形时才等于照片比例。
+
+预览用 `object-fit: cover`。`coverTransform` 把缓冲坐标映到屏幕上。前置摄像头用 CSS 镜像；左右提示会翻转到拿手机的人看到的方向，保存的自拍也会镜像，以便和预览一致。后置摄像头的成片不镜像。
+
+水平线来自运动传感器，不来自肩膀（被拍的人可能自己歪着）。`rollFromGravity` 使用含重力的加速度：正值表示手机右边偏低。没有加速度时退回 gamma。手机平放在桌上时，不算作竖拍的倾斜。
+
+## 构图
+
+`src/composition/rank.ts` 生成几十个候选矩形：
+
+- 按头、胸、腰、大腿中段、全身做纵向跨度；没有相应关节就不生成
+- 水平位置居中；视线偏向一侧时，把人放到另一侧，把空留给视线
+- 一个解析裁切：眼睛落在上三分线，头的大小接近目标
+- 该画幅在画面里能放下的最大矩形（取景框本身）
+
+打分看：眼睛高度、头顶留白、左右位置、头在裁切里的大小、肩膀有没有被裁掉，以及边缘是否切过关节或脖子。比满画幅紧过 `MAX_DIGITAL_ZOOM`（1.65 倍）的候选会被丢掉，除非没有任何合格候选。胜出的矩形就是快门要裁的区域。
+
+这是 GAIC 的思路——生成一批裁切再排序——但没有附带 GAIC 网络。那些模型是在审美数据集上训练的大型打分网络，放进首屏会占掉大部分下载，而且仍然不知道「不要切到膝盖」。规则打分是确定的，并且有测试。`prepareLlmCrop` 是以后替换排序器的接口：它返回的矩形必须通过同一套几何检查。
+
+引导和裁切是分开的。先让拿手机的人把眼睛和头的大小移进取景框里大致正确的位置，裁切只收拾剩余的误差，这样分辨率还在。优先级：
+
+1. 画面里没有人
+2. 手机拿倒了，或者人小得太多 / 近得太多
+3. 倾斜很大
+4. 平移、上下、距离、小倾斜里最大的那一项
+5. 保持稳定，然后可以拍了
+
+提示会稳住几帧，避免闪烁。「可以拍了」和「把人物放进画面」会立刻切换。自动拍摄在 `ready` 为真时触发一次。`ready` 本身就要求稳定检测器看到大约 500 毫秒的静止关键点（如果有加速度计，并且画面并不是非常稳，还要求线性加速度低）。
+
+## 云端裁切
+
+`server/handle.ts` 同时被 Vite 开发服务器和 Vercel 上的 `api/frame.ts`、`api/health.ts` 使用。密钥只在服务端的环境变量里。客户端只能从 `/api/health` 知道有没有密钥。
+
+请求体是一张长边 768 的 JPEG，加上关键点摘要和规则框。提示词要求只返回 JSON：一个归一化的框、一个动作、一句话、一个置信度。供应商可以是 OpenAI、任何兼容 OpenAI 的地址，或 Anthropic。JSON 无效、框没有包住头、超过变焦限度、或切断关节，都会丢掉。箭头始终由本地规则决定，慢的或错的模型不能把拿手机的人拽来拽去。通过检查的框只替换裁切。
+
+## 演示
+
+`src/demo/person.ts` 合成与视觉 Worker 相同结构的 `Subject`。`applyGuidance` 按「如果拿手机的人照做了，画面会怎么变」来移动这个人。单元测试把这个循环跑到计划变为 ready。页面里的演示画出这个人；`?demo=auto` 跑同一个循环。
+
+## iOS 与 Android 的限制
+
+| 限制 | 应用里的做法 |
+| --- | --- |
+| `getUserMedia` 需要安全上下文 | 说明文档：localhost、mkcert，或 Vercel 的 HTTPS |
+| 变焦约束主要在 iOS 17+ | 不用。数字裁切，加上「靠近一点」 |
+| `ImageCapture.takePhoto` 的视野可能和预览不同 | 裁引导分析过的那一帧视频。并请求浏览器愿意给的最大流 |
+| `playsinline` | 已设置，避免 iOS 把相机全屏播放 |
+| Module worker 与 MediaPipe wasm | 使用 ES module 版 wasm；第二个模型前放回工厂函数 |
+| iOS 没有振动 | 先检测 `navigator.vibrate` |
+| 动作权限必须在用户手势里请求 | 和打开相机的同一次点击里请求 |
+
+## 有意不做的事
+
+滤镜、磨皮、补光、信息流，以及任何说给被拍的人听的摆姿指令。被参考的那类产品，是让朋友帮你取景。这个应用做完这件事就停。
